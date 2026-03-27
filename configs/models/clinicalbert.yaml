@@ -1,0 +1,3 @@
+model:
+  name: clinicalbert
+  max_seq_length: 512

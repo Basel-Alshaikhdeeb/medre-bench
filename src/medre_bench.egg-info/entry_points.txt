@@ -1,0 +1,2 @@
+[console_scripts]
+medre-bench = medre_bench.cli:app

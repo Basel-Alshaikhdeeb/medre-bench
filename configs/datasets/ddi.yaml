@@ -1,0 +1,6 @@
+dataset:
+  name: ddi
+
+training:
+  epochs: 10
+  learning_rate: 2.0e-5

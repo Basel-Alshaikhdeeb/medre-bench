@@ -1,0 +1,16 @@
+# This file documents the full sweep configuration.
+# Use the CLI sweep command instead:
+#
+# medre-bench sweep \
+#   --models bert-base,biobert,pubmedbert,scibert,clinicalbert \
+#   --datasets chemprot,ddi,gad,biored,drugprot \
+#   --seeds 42,123,456
+
+training:
+  epochs: 10
+  batch_size: 16
+  learning_rate: 2.0e-5
+
+logging:
+  use_wandb: true
+  use_tensorboard: true

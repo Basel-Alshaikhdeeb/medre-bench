@@ -1,0 +1,3 @@
+model:
+  name: scibert
+  max_seq_length: 512
