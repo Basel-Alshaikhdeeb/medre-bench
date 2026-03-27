@@ -34,7 +34,7 @@ class ChemProtDataset(BaseDataset):
     """
 
     HF_DATASET_ID = "bigbio/chemprot"
-    HF_CONFIG = "chemprot_full_bigbio_kb"
+    HF_CONFIG = "chemprot_bigbio_kb"
 
     def name(self) -> str:
         return "chemprot"
