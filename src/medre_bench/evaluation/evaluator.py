@@ -73,13 +73,19 @@ def run_evaluation(
 
     from medre_bench.training.trainer import REModel, RETokenizedDataset
 
-    # Load the model weights
-    model_state = torch.load(
-        checkpoint / "pytorch_model.bin" if (checkpoint / "pytorch_model.bin").exists()
-        else checkpoint / "model.safetensors",
-        map_location=device,
-        weights_only=True,
-    )
+    # Load the model weights (prefer safetensors format)
+    safetensors_path = checkpoint / "model.safetensors"
+    pytorch_path = checkpoint / "pytorch_model.bin"
+    if safetensors_path.exists():
+        from safetensors.torch import load_file
+        model_state = load_file(str(safetensors_path), device=str(device))
+    elif pytorch_path.exists():
+        model_state = torch.load(pytorch_path, map_location=device, weights_only=True)
+    else:
+        raise FileNotFoundError(
+            f"No model weights found in {checkpoint}. "
+            "Expected model.safetensors or pytorch_model.bin"
+        )
 
     # Determine model architecture from saved config
     import medre_bench.models  # noqa: F401
