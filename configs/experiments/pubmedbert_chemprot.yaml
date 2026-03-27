@@ -1,0 +1,21 @@
+experiment_name: pubmedbert_chemprot
+
+model:
+  name: pubmedbert
+  max_seq_length: 512
+  entity_marker_strategy: typed_entity_marker_punct
+
+dataset:
+  name: chemprot
+
+training:
+  seed: 42
+  epochs: 10
+  batch_size: 16
+  learning_rate: 2.0e-5
+  warmup_ratio: 0.1
+
+logging:
+  use_wandb: true
+  use_tensorboard: true
+  wandb_project: medre-bench

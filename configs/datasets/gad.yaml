@@ -1,0 +1,6 @@
+dataset:
+  name: gad
+
+training:
+  epochs: 15
+  learning_rate: 2.0e-5

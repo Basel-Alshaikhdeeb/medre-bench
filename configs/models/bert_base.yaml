@@ -1,0 +1,3 @@
+model:
+  name: bert-base
+  max_seq_length: 512

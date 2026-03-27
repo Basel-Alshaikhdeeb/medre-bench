@@ -1,0 +1,27 @@
+training:
+  seed: 42
+  epochs: 10
+  batch_size: 16
+  eval_batch_size: 32
+  learning_rate: 2.0e-5
+  warmup_ratio: 0.1
+  weight_decay: 0.01
+  fp16: true
+  gradient_accumulation_steps: 1
+  early_stopping_patience: 3
+  metric_for_best_model: micro_f1
+  max_grad_norm: 1.0
+  dataloader_num_workers: 4
+
+model:
+  max_seq_length: 512
+  entity_marker_strategy: typed_entity_marker_punct
+
+logging:
+  use_wandb: true
+  use_tensorboard: true
+  wandb_project: medre-bench
+  log_every_n_steps: 50
+  eval_strategy: epoch
+  save_strategy: epoch
+  save_total_limit: 2

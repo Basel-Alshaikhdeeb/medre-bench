@@ -1,0 +1,3 @@
+model:
+  name: pubmedbert
+  max_seq_length: 512
