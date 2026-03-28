@@ -7,30 +7,23 @@ from medre_bench.registry import DATASET_REGISTRY
 
 # ChemProt relation classes (BioCreative VI evaluation groups)
 _LABEL_NAMES = [
-    "CPR:3",   # Upregulator/Activator
-    "CPR:4",   # Downregulator/Inhibitor
-    "CPR:5",   # Agonist
-    "CPR:6",   # Antagonist
-    "CPR:9",   # Substrate/Product
-    "false",   # No relation
+    "Upregulator",    # CPR:3
+    "Downregulator",  # CPR:4
+    "Agonist",        # CPR:5
+    "Antagonist",     # CPR:6
+    "Substrate",      # CPR:9
+    "Not",            # Negative / no relation
 ]
 
 _LABEL_TO_ID = {label: idx for idx, label in enumerate(_LABEL_NAMES)}
 
-# BigBIO KB schema may use different relation type names
+# Additional relation types in the dataset mapped to evaluation groups
 _NORMALIZED_LABEL_MAP = {
-    # BigBIO naming -> our label names
-    "UPREGULATOR": "CPR:3",
-    "ACTIVATOR": "CPR:3",
-    "DOWNREGULATOR": "CPR:4",
-    "INHIBITOR": "CPR:4",
-    "AGONIST": "CPR:5",
-    "AGONIST-ACTIVATOR": "CPR:5",
-    "AGONIST-INHIBITOR": "CPR:5",
-    "ANTAGONIST": "CPR:6",
-    "SUBSTRATE": "CPR:9",
-    "PRODUCT-OF": "CPR:9",
-    "SUBSTRATE_PRODUCT-OF": "CPR:9",
+    "Regulator": "Upregulator",
+    "Cofactor": "Substrate",
+    "Modulator": "Agonist",
+    "Undefined": "Not",
+    "Part_of": "Not",
 }
 
 # Map from split names to HuggingFace split keys
