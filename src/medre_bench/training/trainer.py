@@ -91,7 +91,7 @@ class REModel(torch.nn.Module):
         super().__init__()
         self.base_model = base_model
         self.num_labels = num_labels
-        self.config = type("Config", (), {"num_labels": num_labels})()
+        self.config = base_model.encoder.config
 
     def forward(
         self,
