@@ -6,11 +6,10 @@ from medre_bench.datasets.base import BaseDataset, RelationExample
 from medre_bench.registry import DATASET_REGISTRY
 
 _LABEL_NAMES = [
-    "advice",
-    "effect",
-    "int",
-    "mechanism",
-    "false",
+    "ADVISE",
+    "EFFECT",
+    "INT",
+    "MECHANISM",
 ]
 
 _LABEL_TO_ID = {label: idx for idx, label in enumerate(_LABEL_NAMES)}
