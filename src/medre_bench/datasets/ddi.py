@@ -66,6 +66,7 @@ class DDIDataset(BaseDataset):
         ds = load_dataset(self.HF_DATASET_ID, self.HF_CONFIG, split=hf_split, trust_remote_code=True)
 
         examples = []
+        seen_rel_types = set()
         for doc in ds:
             text = " ".join([p["text"][0] for p in doc["passages"]])
             entities_by_id = {}
@@ -79,6 +80,7 @@ class DDIDataset(BaseDataset):
 
             for relation in doc["relations"]:
                 rel_type = relation["type"]
+                seen_rel_types.add(rel_type)
                 if rel_type not in _LABEL_TO_ID:
                     continue
 
@@ -107,5 +109,12 @@ class DDIDataset(BaseDataset):
                         metadata={"doc_id": doc["id"]},
                     )
                 )
+
+        if not examples:
+            raise ValueError(
+                f"No examples loaded from {self.HF_DATASET_ID}/{self.HF_CONFIG} "
+                f"split={hf_split}. Relation types found in data: {seen_rel_types}. "
+                f"Expected types: {set(_LABEL_TO_ID.keys())}"
+            )
 
         return examples
