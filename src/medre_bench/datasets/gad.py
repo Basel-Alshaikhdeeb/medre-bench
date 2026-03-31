@@ -14,10 +14,11 @@ _LABEL_TO_ID = {label: idx for idx, label in enumerate(_LABEL_NAMES)}
 
 _SPLIT_MAP = {
     "train": "train",
-    "validation": "validation",
-    "dev": "validation",
     "test": "test",
 }
+
+_VAL_FRACTION = 0.15
+_SEED = 42
 
 
 @DATASET_REGISTRY.register("gad")
@@ -37,6 +38,25 @@ class GADDataset(BaseDataset):
         return list(_LABEL_NAMES)
 
     def load_split(self, split: str) -> list[RelationExample]:
+        import random
+
+        # GAD has no validation split; carve one from train
+        if split in ("validation", "dev"):
+            all_train = self._load_raw_split("train")
+            rng = random.Random(_SEED)
+            rng.shuffle(all_train)
+            val_size = int(len(all_train) * _VAL_FRACTION)
+            return all_train[:val_size]
+        if split == "train":
+            all_train = self._load_raw_split("train")
+            rng = random.Random(_SEED)
+            rng.shuffle(all_train)
+            val_size = int(len(all_train) * _VAL_FRACTION)
+            return all_train[val_size:]
+
+        return self._load_raw_split(split)
+
+    def _load_raw_split(self, split: str) -> list[RelationExample]:
         from datasets import load_dataset
 
         hf_split = _SPLIT_MAP.get(split, split)
