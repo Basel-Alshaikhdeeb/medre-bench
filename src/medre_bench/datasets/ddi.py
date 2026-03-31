@@ -6,7 +6,7 @@ from medre_bench.datasets.base import BaseDataset, RelationExample
 from medre_bench.registry import DATASET_REGISTRY
 
 _LABEL_NAMES = [
-    "advise",
+    "advice",
     "effect",
     "int",
     "mechanism",
