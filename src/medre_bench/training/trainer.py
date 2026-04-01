@@ -93,6 +93,10 @@ class REModel(torch.nn.Module):
         self.num_labels = num_labels
         self.config = base_model.encoder.config
 
+    def state_dict(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        sd = super().state_dict(*args, **kwargs)
+        return {k: v.contiguous() if not v.is_contiguous() else v for k, v in sd.items()}
+
     def forward(
         self,
         input_ids: torch.Tensor,
