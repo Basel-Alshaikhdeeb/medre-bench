@@ -30,10 +30,10 @@ _LABEL_TO_ID = {label: idx for idx, label in enumerate(_LABEL_NAMES)}
 
 _SPLIT_MAP = {
     "train": "train",
-    "validation": "validation",
-    "dev": "validation",
-    "test": "test",
 }
+
+_VAL_FRACTION = 0.15
+_SEED = 42
 
 
 @DATASET_REGISTRY.register("chem_dis_gene")
@@ -53,6 +53,26 @@ class ChemDisGeneDataset(BaseDataset):
         return list(_LABEL_NAMES)
 
     def load_split(self, split: str) -> list[RelationExample]:
+        import random
+
+        # ChemDisGene only has a train split; carve validation and test from it
+        all_examples = self._load_raw_split("train")
+        rng = random.Random(_SEED)
+        rng.shuffle(all_examples)
+
+        val_size = int(len(all_examples) * _VAL_FRACTION)
+        test_size = int(len(all_examples) * _VAL_FRACTION)
+
+        if split in ("test",):
+            return all_examples[:test_size]
+        if split in ("validation", "dev"):
+            return all_examples[test_size : test_size + val_size]
+        if split == "train":
+            return all_examples[test_size + val_size :]
+
+        return self._load_raw_split(split)
+
+    def _load_raw_split(self, split: str) -> list[RelationExample]:
         from datasets import load_dataset
 
         hf_split = _SPLIT_MAP.get(split, split)
