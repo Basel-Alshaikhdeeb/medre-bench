@@ -42,6 +42,7 @@ class TrainingConfig(BaseModel):
     metric_for_best_model: str = "micro_f1"
     max_grad_norm: float = 1.0
     dataloader_num_workers: int = 4
+    deepspeed: Optional[str] = Field(None, description="Path to DeepSpeed config JSON")
 
 
 class LoggingConfig(BaseModel):
