@@ -215,6 +215,7 @@ def run_training(cfg: ExperimentConfig) -> dict[str, Any]:
         seed=cfg.training.seed,
         dataloader_num_workers=cfg.training.dataloader_num_workers,
         remove_unused_columns=False,
+        deepspeed=cfg.training.deepspeed,
     )
 
     # Callbacks
