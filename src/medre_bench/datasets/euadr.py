@@ -57,39 +57,53 @@ class EuADRDataset(BaseDataset):
         examples = []
         seen_rel_types = set()
         for row in ds:
-            text = row.get("text", "")
-            doc_id = row.get("document_id", "")
-            entities_raw = row.get("entities", [])
-            relations_raw = row.get("relations", [])
+            text = (row.get("title", "") + " " + row.get("abstract", "")).strip()
+            doc_id = row.get("pmid", "")
+            annotations = row.get("annotations", [])
 
-            if not relations_raw:
+            if not annotations:
                 continue
 
-            entities_by_id = {}
-            for entity in entities_raw:
-                eid = entity["id"]
-                offsets = entity["offsets"]
-                entities_by_id[eid] = {
-                    "text": entity["text"][0] if isinstance(entity["text"], list) else entity["text"],
-                    "type": entity.get("type", ""),
-                    "start": offsets[0][0] if isinstance(offsets[0], list) else offsets[0],
-                    "end": offsets[0][1] if isinstance(offsets[0], list) else offsets[1],
+            # First pass: collect concept (entity) annotations indexed by their ID
+            concepts = {}
+            for ann in annotations:
+                parts = ann.strip().split("\t")
+                if len(parts) < 3 or parts[2] != "concept":
+                    continue
+                # Format: rel_category, True/False, "concept", text, start, end, annotators, db_ids, idx, entity_type
+                if len(parts) < 10:
+                    continue
+                idx = parts[8]
+                concepts[idx] = {
+                    "text": parts[3],
+                    "type": parts[9],
+                    "start": int(parts[4]),
+                    "end": int(parts[5]),
                 }
 
-            for relation in relations_raw:
-                rel_type = relation.get("type", "")
+            # Second pass: collect relation annotations
+            for ann in annotations:
+                parts = ann.strip().split("\t")
+                if len(parts) < 3 or parts[2] != "relation":
+                    continue
+                # Format: rel_category, True/False, "relation", ent1_idx, ent2_idx,
+                #         db_ids1, db_ids2, offsets1, offsets2, annotators, label
+                if len(parts) < 11:
+                    continue
+
+                rel_type = parts[10].strip()
                 seen_rel_types.add(rel_type)
                 if rel_type not in _LABEL_TO_ID:
                     continue
 
-                arg1_id = relation.get("arg1_id", "")
-                arg2_id = relation.get("arg2_id", "")
+                ent1_idx = parts[3]
+                ent2_idx = parts[4]
 
-                if arg1_id not in entities_by_id or arg2_id not in entities_by_id:
+                if ent1_idx not in concepts or ent2_idx not in concepts:
                     continue
 
-                e1 = entities_by_id[arg1_id]
-                e2 = entities_by_id[arg2_id]
+                e1 = concepts[ent1_idx]
+                e2 = concepts[ent2_idx]
 
                 examples.append(
                     RelationExample(
