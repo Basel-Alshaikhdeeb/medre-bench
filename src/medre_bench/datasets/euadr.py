@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+import json
+import logging
+from pathlib import Path
+
 from medre_bench.datasets.base import BaseDataset, RelationExample
 from medre_bench.registry import DATASET_REGISTRY
+
+logger = logging.getLogger(__name__)
 
 _LABEL_NAMES = [
     "PA",  # Positive Association
@@ -13,20 +19,19 @@ _LABEL_NAMES = [
 
 _LABEL_TO_ID = {label: idx for idx, label in enumerate(_LABEL_NAMES)}
 
-_SPLIT_MAP = {
-    "train": "train",
-}
-
 _VAL_FRACTION = 0.15
 _SEED = 42
+
+# EU-ADR source files in the HuggingFace repo
+_HF_REPO = "bigbio/euadr"
+_SOURCE_FILES = [
+    "euadr_source/train/0000.parquet",
+]
 
 
 @DATASET_REGISTRY.register("euadr")
 class EuADRDataset(BaseDataset):
     """EU-ADR: European Adverse Drug Reactions corpus."""
-
-    HF_DATASET_ID = "bigbio/euadr"
-    HF_CONFIG = "euadr_bigbio_kb"
 
     def name(self) -> str:
         return "euadr"
@@ -41,7 +46,7 @@ class EuADRDataset(BaseDataset):
         import random
 
         # EU-ADR only has a train split; carve validation and test from it
-        all_examples = self._load_raw_split("train")
+        all_examples = self._load_all()
         rng = random.Random(_SEED)
         rng.shuffle(all_examples)
 
@@ -55,41 +60,56 @@ class EuADRDataset(BaseDataset):
         if split == "train":
             return all_examples[test_size + val_size :]
 
-        return self._load_raw_split(split)
+        raise ValueError(f"Unknown split: {split}")
 
-    def _load_raw_split(self, split: str) -> list[RelationExample]:
+    def _load_all(self) -> list[RelationExample]:
+        """Load EU-ADR using the source config and extract relations."""
         from datasets import load_dataset
 
-        hf_split = _SPLIT_MAP.get(split, split)
-        ds = load_dataset(
-            self.HF_DATASET_ID,
-            self.HF_CONFIG,
-            split=hf_split,
-            trust_remote_code=True,
-            revision="main",
-        )
+        try:
+            ds = load_dataset(
+                _HF_REPO,
+                "euadr_source",
+                split="train",
+                trust_remote_code=True,
+            )
+        except Exception:
+            logger.info("Standard loading failed, trying direct parquet download")
+            ds = self._load_from_parquet()
 
         examples = []
         seen_rel_types = set()
-        for doc in ds:
-            text = " ".join([p["text"][0] for p in doc["passages"]])
+        for row in ds:
+            doc_id = row.get("document_id", "")
+            text = row.get("text", "")
+
+            # Source schema stores entities and relations differently
+            entities_raw = row.get("entities", [])
+            relations_raw = row.get("relations", [])
+
+            if not entities_raw or not relations_raw:
+                continue
+
             entities_by_id = {}
-            for entity in doc["entities"]:
-                entities_by_id[entity["id"]] = {
-                    "text": entity["text"][0],
-                    "type": entity["type"],
-                    "start": entity["offsets"][0][0],
-                    "end": entity["offsets"][0][1],
+            for entity in entities_raw:
+                eid = entity.get("id", entity.get("entity_id", ""))
+                offsets = entity.get("offsets", [[0, 0]])
+                texts = entity.get("text", [""])
+                entities_by_id[eid] = {
+                    "text": texts[0] if isinstance(texts, list) else texts,
+                    "type": entity.get("type", entity.get("entity_type", "")),
+                    "start": offsets[0][0] if isinstance(offsets[0], list) else offsets[0],
+                    "end": offsets[0][1] if isinstance(offsets[0], list) else offsets[1],
                 }
 
-            for relation in doc["relations"]:
-                rel_type = relation["type"]
+            for relation in relations_raw:
+                rel_type = relation.get("type", relation.get("relation_type", ""))
                 seen_rel_types.add(rel_type)
                 if rel_type not in _LABEL_TO_ID:
                     continue
 
-                arg1_id = relation["arg1_id"]
-                arg2_id = relation["arg2_id"]
+                arg1_id = relation.get("arg1_id", "")
+                arg2_id = relation.get("arg2_id", "")
 
                 if arg1_id not in entities_by_id or arg2_id not in entities_by_id:
                     continue
@@ -110,15 +130,28 @@ class EuADRDataset(BaseDataset):
                         entity2_end=e2["end"],
                         label=rel_type,
                         label_id=_LABEL_TO_ID[rel_type],
-                        metadata={"doc_id": doc["id"]},
+                        metadata={"doc_id": doc_id},
                     )
                 )
 
         if not examples:
             raise ValueError(
-                f"No examples loaded from {self.HF_DATASET_ID}/{self.HF_CONFIG} "
-                f"split={hf_split}. Relation types found in data: {seen_rel_types}. "
+                f"No examples loaded from {_HF_REPO}. "
+                f"Relation types found in data: {seen_rel_types}. "
                 f"Expected types: {set(_LABEL_TO_ID.keys())}"
             )
 
         return examples
+
+    def _load_from_parquet(self):
+        """Fallback: download parquet file directly via huggingface_hub."""
+        from huggingface_hub import hf_hub_download
+        import pyarrow.parquet as pq
+
+        local_path = hf_hub_download(
+            repo_id=_HF_REPO,
+            filename="euadr_source/train/0000.parquet",
+            repo_type="dataset",
+        )
+        table = pq.read_table(local_path)
+        return table.to_pylist()
