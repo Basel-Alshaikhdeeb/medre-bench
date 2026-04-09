@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import json
+import importlib.util
 import logging
-from pathlib import Path
+import sys
 
 from medre_bench.datasets.base import BaseDataset, RelationExample
 from medre_bench.registry import DATASET_REGISTRY
@@ -21,12 +21,6 @@ _LABEL_TO_ID = {label: idx for idx, label in enumerate(_LABEL_NAMES)}
 
 _VAL_FRACTION = 0.15
 _SEED = 42
-
-# EU-ADR source files in the HuggingFace repo
-_HF_REPO = "bigbio/euadr"
-_SOURCE_FILES = [
-    "euadr_source/train/0000.parquet",
-]
 
 
 @DATASET_REGISTRY.register("euadr")
@@ -45,7 +39,6 @@ class EuADRDataset(BaseDataset):
     def load_split(self, split: str) -> list[RelationExample]:
         import random
 
-        # EU-ADR only has a train split; carve validation and test from it
         all_examples = self._load_all()
         rng = random.Random(_SEED)
         rng.shuffle(all_examples)
@@ -63,53 +56,79 @@ class EuADRDataset(BaseDataset):
         raise ValueError(f"Unknown split: {split}")
 
     def _load_all(self) -> list[RelationExample]:
-        """Load EU-ADR using the source config and extract relations."""
-        from datasets import load_dataset
+        """Load EU-ADR by downloading and executing the dataset script directly."""
+        from huggingface_hub import hf_hub_download
 
-        try:
-            ds = load_dataset(
-                _HF_REPO,
-                "euadr_source",
-                split="train",
-                trust_remote_code=True,
+        # Download the dataset script and its dependency
+        script_path = hf_hub_download("bigbio/euadr", "euadr.py", repo_type="dataset")
+        hub_path = hf_hub_download("bigbio/euadr", "bigbiohub.py", repo_type="dataset")
+
+        # Load bigbiohub module so the dataset script can import it
+        if "bigbiohub" not in sys.modules:
+            spec = importlib.util.spec_from_file_location("bigbiohub", hub_path)
+            mod = importlib.util.module_from_spec(spec)
+            sys.modules["bigbiohub"] = mod
+            spec.loader.exec_module(mod)
+
+        # Load the dataset script as a module
+        spec = importlib.util.spec_from_file_location("euadr_loader", script_path)
+        loader_mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(loader_mod)
+
+        # Find the builder class (subclass of datasets.GeneratorBasedBuilder)
+        import datasets
+
+        builder_cls = None
+        for attr_name in dir(loader_mod):
+            attr = getattr(loader_mod, attr_name)
+            if (
+                isinstance(attr, type)
+                and issubclass(attr, datasets.GeneratorBasedBuilder)
+                and attr is not datasets.GeneratorBasedBuilder
+            ):
+                builder_cls = attr
+                break
+
+        if builder_cls is None:
+            raise RuntimeError("Could not find dataset builder class in euadr.py")
+
+        # Find the bigbio_kb config
+        builder = None
+        for config in builder_cls.BUILDER_CONFIGS:
+            if "bigbio_kb" in config.name:
+                builder = builder_cls(config_name=config.name)
+                break
+
+        if builder is None:
+            raise RuntimeError(
+                f"Could not find bigbio_kb config. Available: "
+                f"{[c.name for c in builder_cls.BUILDER_CONFIGS]}"
             )
-        except Exception:
-            logger.info("Standard loading failed, trying direct parquet download")
-            ds = self._load_from_parquet()
+
+        builder.download_and_prepare()
+        ds = builder.as_dataset(split="train")
 
         examples = []
         seen_rel_types = set()
-        for row in ds:
-            doc_id = row.get("document_id", "")
-            text = row.get("text", "")
-
-            # Source schema stores entities and relations differently
-            entities_raw = row.get("entities", [])
-            relations_raw = row.get("relations", [])
-
-            if not entities_raw or not relations_raw:
-                continue
-
+        for doc in ds:
+            text = " ".join([p["text"][0] for p in doc["passages"]])
             entities_by_id = {}
-            for entity in entities_raw:
-                eid = entity.get("id", entity.get("entity_id", ""))
-                offsets = entity.get("offsets", [[0, 0]])
-                texts = entity.get("text", [""])
-                entities_by_id[eid] = {
-                    "text": texts[0] if isinstance(texts, list) else texts,
-                    "type": entity.get("type", entity.get("entity_type", "")),
-                    "start": offsets[0][0] if isinstance(offsets[0], list) else offsets[0],
-                    "end": offsets[0][1] if isinstance(offsets[0], list) else offsets[1],
+            for entity in doc["entities"]:
+                entities_by_id[entity["id"]] = {
+                    "text": entity["text"][0],
+                    "type": entity["type"],
+                    "start": entity["offsets"][0][0],
+                    "end": entity["offsets"][0][1],
                 }
 
-            for relation in relations_raw:
-                rel_type = relation.get("type", relation.get("relation_type", ""))
+            for relation in doc["relations"]:
+                rel_type = relation["type"]
                 seen_rel_types.add(rel_type)
                 if rel_type not in _LABEL_TO_ID:
                     continue
 
-                arg1_id = relation.get("arg1_id", "")
-                arg2_id = relation.get("arg2_id", "")
+                arg1_id = relation["arg1_id"]
+                arg2_id = relation["arg2_id"]
 
                 if arg1_id not in entities_by_id or arg2_id not in entities_by_id:
                     continue
@@ -130,28 +149,15 @@ class EuADRDataset(BaseDataset):
                         entity2_end=e2["end"],
                         label=rel_type,
                         label_id=_LABEL_TO_ID[rel_type],
-                        metadata={"doc_id": doc_id},
+                        metadata={"doc_id": doc["id"]},
                     )
                 )
 
         if not examples:
             raise ValueError(
-                f"No examples loaded from {_HF_REPO}. "
+                f"No examples loaded from bigbio/euadr. "
                 f"Relation types found in data: {seen_rel_types}. "
                 f"Expected types: {set(_LABEL_TO_ID.keys())}"
             )
 
         return examples
-
-    def _load_from_parquet(self):
-        """Fallback: download parquet file directly via huggingface_hub."""
-        from huggingface_hub import hf_hub_download
-        import pyarrow.parquet as pq
-
-        local_path = hf_hub_download(
-            repo_id=_HF_REPO,
-            filename="euadr_source/train/0000.parquet",
-            repo_type="dataset",
-        )
-        table = pq.read_table(local_path)
-        return table.to_pylist()
