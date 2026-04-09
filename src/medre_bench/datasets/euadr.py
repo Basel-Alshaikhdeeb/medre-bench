@@ -63,17 +63,32 @@ class EuADRDataset(BaseDataset):
         script_path = hf_hub_download("bigbio/euadr", "euadr.py", repo_type="dataset")
         hub_path = hf_hub_download("bigbio/euadr", "bigbiohub.py", repo_type="dataset")
 
-        # Load bigbiohub module so the dataset script can import it
-        if "bigbiohub" not in sys.modules:
-            spec = importlib.util.spec_from_file_location("bigbiohub", hub_path)
-            mod = importlib.util.module_from_spec(spec)
-            sys.modules["bigbiohub"] = mod
-            spec.loader.exec_module(mod)
+        # Create a fake package so relative imports (from .bigbiohub) work
+        import types
+        from pathlib import Path
 
-        # Load the dataset script as a module
-        spec = importlib.util.spec_from_file_location("euadr_loader", script_path)
-        loader_mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(loader_mod)
+        pkg_dir = str(Path(script_path).parent)
+        pkg_name = "_euadr_pkg"
+
+        pkg = types.ModuleType(pkg_name)
+        pkg.__path__ = [pkg_dir]
+        pkg.__package__ = pkg_name
+        sys.modules[pkg_name] = pkg
+
+        # Load bigbiohub as a submodule of the fake package
+        hub_spec = importlib.util.spec_from_file_location(f"{pkg_name}.bigbiohub", hub_path)
+        hub_mod = importlib.util.module_from_spec(hub_spec)
+        sys.modules[f"{pkg_name}.bigbiohub"] = hub_mod
+        hub_spec.loader.exec_module(hub_mod)
+
+        # Load the dataset script as a submodule
+        ds_spec = importlib.util.spec_from_file_location(
+            f"{pkg_name}.euadr", script_path, submodule_search_locations=[]
+        )
+        loader_mod = importlib.util.module_from_spec(ds_spec)
+        loader_mod.__package__ = pkg_name
+        sys.modules[f"{pkg_name}.euadr"] = loader_mod
+        ds_spec.loader.exec_module(loader_mod)
 
         # Find the builder class (subclass of datasets.GeneratorBasedBuilder)
         import datasets
