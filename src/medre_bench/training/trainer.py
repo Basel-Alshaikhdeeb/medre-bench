@@ -191,6 +191,7 @@ def run_training(cfg: ExperimentConfig) -> dict[str, Any]:
             os.environ["WANDB_ENTITY"] = cfg.logging.wandb_entity
 
     # Training arguments
+    save_ckpt = cfg.training.save_checkpoints
     training_args = TrainingArguments(
         output_dir=str(run_dir / "checkpoints"),
         num_train_epochs=cfg.training.epochs,
@@ -203,11 +204,11 @@ def run_training(cfg: ExperimentConfig) -> dict[str, Any]:
         gradient_accumulation_steps=cfg.training.gradient_accumulation_steps,
         max_grad_norm=cfg.training.max_grad_norm,
         eval_strategy=cfg.logging.eval_strategy,
-        save_strategy=cfg.logging.save_strategy,
-        save_total_limit=cfg.logging.save_total_limit,
-        load_best_model_at_end=True,
-        metric_for_best_model=cfg.training.metric_for_best_model,
-        greater_is_better=True,
+        save_strategy=cfg.logging.save_strategy if save_ckpt else "no",
+        save_total_limit=cfg.logging.save_total_limit if save_ckpt else 0,
+        load_best_model_at_end=save_ckpt,
+        metric_for_best_model=cfg.training.metric_for_best_model if save_ckpt else None,
+        greater_is_better=True if save_ckpt else None,
         logging_steps=cfg.logging.log_every_n_steps,
         logging_dir=str(run_dir / "tensorboard"),
         report_to=report_to,
@@ -221,8 +222,9 @@ def run_training(cfg: ExperimentConfig) -> dict[str, Any]:
     # Callbacks
     callbacks = [
         ConfigSnapshotCallback(cfg.model_dump(), run_dir),
-        EarlyStoppingCallback(early_stopping_patience=cfg.training.early_stopping_patience),
     ]
+    if save_ckpt:
+        callbacks.append(EarlyStoppingCallback(early_stopping_patience=cfg.training.early_stopping_patience))
     if cfg.logging.use_wandb:
         callbacks.append(WandbExtrasCallback(label_names=dataset.label_names()))
 
