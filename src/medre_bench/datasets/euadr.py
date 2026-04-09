@@ -61,7 +61,13 @@ class EuADRDataset(BaseDataset):
         from datasets import load_dataset
 
         hf_split = _SPLIT_MAP.get(split, split)
-        ds = load_dataset(self.HF_DATASET_ID, self.HF_CONFIG, split=hf_split, trust_remote_code=True)
+        ds = load_dataset(
+            self.HF_DATASET_ID,
+            self.HF_CONFIG,
+            split=hf_split,
+            trust_remote_code=True,
+            revision="main",
+        )
 
         examples = []
         seen_rel_types = set()
