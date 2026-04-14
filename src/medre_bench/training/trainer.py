@@ -97,6 +97,16 @@ class REModel(torch.nn.Module):
         sd = super().state_dict(*args, **kwargs)
         return {k: v.contiguous() if not v.is_contiguous() else v for k, v in sd.items()}
 
+    def gradient_checkpointing_enable(self, gradient_checkpointing_kwargs: Any = None) -> None:
+        encoder = self.base_model.encoder
+        kwargs = gradient_checkpointing_kwargs or {}
+        encoder.gradient_checkpointing_enable(**kwargs) if kwargs else encoder.gradient_checkpointing_enable()
+        if hasattr(encoder, "config"):
+            encoder.config.use_cache = False
+
+    def gradient_checkpointing_disable(self) -> None:
+        self.base_model.encoder.gradient_checkpointing_disable()
+
     def forward(
         self,
         input_ids: torch.Tensor,
@@ -219,11 +229,6 @@ def run_training(cfg: ExperimentConfig) -> dict[str, Any]:
         deepspeed=cfg.training.deepspeed,
         gradient_checkpointing=cfg.training.gradient_checkpointing,
     )
-
-    if cfg.training.gradient_checkpointing:
-        base_model.encoder.gradient_checkpointing_enable()
-        if hasattr(base_model.encoder, "config"):
-            base_model.encoder.config.use_cache = False
 
     # Callbacks
     callbacks = [
