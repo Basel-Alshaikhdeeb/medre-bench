@@ -217,7 +217,13 @@ def run_training(cfg: ExperimentConfig) -> dict[str, Any]:
         dataloader_num_workers=cfg.training.dataloader_num_workers,
         remove_unused_columns=False,
         deepspeed=cfg.training.deepspeed,
+        gradient_checkpointing=cfg.training.gradient_checkpointing,
     )
+
+    if cfg.training.gradient_checkpointing:
+        base_model.encoder.gradient_checkpointing_enable()
+        if hasattr(base_model.encoder, "config"):
+            base_model.encoder.config.use_cache = False
 
     # Callbacks
     callbacks = [

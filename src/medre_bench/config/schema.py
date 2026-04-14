@@ -44,6 +44,7 @@ class TrainingConfig(BaseModel):
     dataloader_num_workers: int = 4
     deepspeed: Optional[str] = Field(None, description="Path to DeepSpeed config JSON")
     save_checkpoints: bool = Field(True, description="Save model checkpoints; disable for benchmarking sweeps")
+    gradient_checkpointing: bool = Field(False, description="Enable gradient checkpointing to trade compute for memory")
 
 
 class LoggingConfig(BaseModel):
