@@ -32,6 +32,18 @@ class DatasetConfig(BaseModel):
         False,
         description="Use inverse-frequency class weights in the loss (alternative/complement to oversampling)",
     )
+    cleaning_strategy: str = Field(
+        "none",
+        description="Boundary cleaning strategy applied to train split: 'none' or 'tomek'",
+    )
+    cleaning_embedding_model: str = Field(
+        "sentence-transformers/all-MiniLM-L6-v2",
+        description="Sentence-transformers model id used to embed examples for Tomek cleaning",
+    )
+    cleaning_cache_dir: Optional[str] = Field(
+        None,
+        description="Directory to cache embeddings between runs; defaults to <output_dir>/_tomek_cache",
+    )
 
 
 class TrainingConfig(BaseModel):

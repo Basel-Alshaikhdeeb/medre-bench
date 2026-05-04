@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+import hashlib
+import logging
 import random
 import re
 from collections import Counter, defaultdict
+from pathlib import Path
+from typing import TYPE_CHECKING
 
-from medre_bench.datasets.base import RelationExample
+from medre_bench.datasets.base import RelationExample, apply_entity_markers
+
+if TYPE_CHECKING:
+    import numpy as np
+
+logger = logging.getLogger(__name__)
 
 NO_RELATION = "NO_RELATION"
 
@@ -181,6 +190,142 @@ def random_oversample(
 
     rng.shuffle(balanced)
     return balanced
+
+
+def _build_marked_texts(examples: list[RelationExample], strategy: str) -> list[str]:
+    texts = []
+    for ex in examples:
+        has_entities = (ex.entity1_start != ex.entity1_end) or (ex.entity2_start != ex.entity2_end)
+        if has_entities and strategy != "none":
+            texts.append(apply_entity_markers(
+                text=ex.text,
+                e1_start=ex.entity1_start,
+                e1_end=ex.entity1_end,
+                e1_type=ex.entity1_type,
+                e2_start=ex.entity2_start,
+                e2_end=ex.entity2_end,
+                e2_type=ex.entity2_type,
+                strategy=strategy,
+            ))
+        else:
+            texts.append(ex.text)
+    return texts
+
+
+def _embed_texts(
+    texts: list[str],
+    embedding_model: str,
+    cache_path: Path | None,
+    batch_size: int,
+) -> "np.ndarray":
+    import numpy as np
+
+    if cache_path and cache_path.exists():
+        # Cache key includes content hash to invalidate on data change
+        cached = np.load(cache_path, allow_pickle=False)
+        if cached["text_hash"].item() == _hash_texts(texts):
+            logger.info(f"Loaded cached embeddings from {cache_path}")
+            return cached["embeddings"]
+
+    from sentence_transformers import SentenceTransformer
+    import torch
+
+    device = "cuda" if torch.cuda.is_available() else (
+        "mps" if torch.backends.mps.is_available() else "cpu"
+    )
+    logger.info(f"Embedding {len(texts):,} texts with {embedding_model} on {device}")
+    model = SentenceTransformer(embedding_model, device=device)
+    embeddings = model.encode(
+        texts,
+        batch_size=batch_size,
+        show_progress_bar=True,
+        convert_to_numpy=True,
+        normalize_embeddings=True,
+    )
+
+    if cache_path:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        np.savez(cache_path, embeddings=embeddings, text_hash=np.array(_hash_texts(texts)))
+        logger.info(f"Cached embeddings to {cache_path}")
+
+    return embeddings
+
+
+def _hash_texts(texts: list[str]) -> str:
+    h = hashlib.sha1()
+    for t in texts:
+        h.update(t.encode("utf-8"))
+        h.update(b"\x00")
+    return h.hexdigest()
+
+
+def clean_with_tomek(
+    examples: list[RelationExample],
+    entity_marker_strategy: str = "typed_entity_marker_punct",
+    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2",
+    cache_dir: Path | str | None = None,
+    cache_key: str | None = None,
+    batch_size: int = 128,
+) -> list[RelationExample]:
+    """Remove Tomek-link majority-class samples to clean class boundaries.
+
+    For each pair of mutual nearest neighbors with different labels, remove
+    the member belonging to the more-frequent class (globally). Operates on
+    sentence-transformers embeddings of the marked text the model will see.
+
+    Args:
+        examples: list of pair-level RelationExamples (typically the train split).
+        entity_marker_strategy: how to mark entities before embedding.
+        embedding_model: sentence-transformers model id.
+        cache_dir: optional directory to cache embeddings between runs.
+        cache_key: cache filename stem (e.g. "bc5cdr_train"); skipped if None.
+        batch_size: embedding batch size.
+
+    Returns:
+        Filtered list of examples with Tomek-link majority-class members removed.
+    """
+    if not examples:
+        return []
+
+    import numpy as np
+    from sklearn.neighbors import NearestNeighbors
+
+    cache_path: Path | None = None
+    if cache_dir and cache_key:
+        safe_model = embedding_model.replace("/", "_")
+        cache_path = Path(cache_dir) / f"{cache_key}__{safe_model}.npz"
+
+    texts = _build_marked_texts(examples, entity_marker_strategy)
+    embeddings = _embed_texts(texts, embedding_model, cache_path, batch_size)
+
+    nn = NearestNeighbors(n_neighbors=2, metric="cosine", n_jobs=-1)
+    nn.fit(embeddings)
+    _, neighbor_indices = nn.kneighbors(embeddings)
+    nearest = neighbor_indices[:, 1]
+
+    labels = np.array([ex.label_id for ex in examples])
+    counts = Counter(labels.tolist())
+
+    tomek_mask = np.zeros(len(examples), dtype=bool)
+    for i, j in enumerate(nearest):
+        if nearest[j] == i and labels[i] != labels[j]:
+            # Remove whichever side belongs to the more-frequent class
+            if counts[int(labels[i])] >= counts[int(labels[j])]:
+                tomek_mask[i] = True
+            else:
+                tomek_mask[j] = True
+
+    n_removed = int(tomek_mask.sum())
+    keep = ~tomek_mask
+    cleaned = [ex for ex, k in zip(examples, keep) if k]
+
+    removed_by_class = Counter(int(labels[i]) for i in np.where(tomek_mask)[0])
+    logger.info(
+        f"Tomek cleaning: removed {n_removed:,}/{len(examples):,} "
+        f"({n_removed/len(examples)*100:.1f}%); per-class removed: {dict(removed_by_class)}"
+    )
+
+    return cleaned
 
 
 def compute_class_weights(
