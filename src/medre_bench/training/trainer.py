@@ -15,6 +15,7 @@ from transformers import (
 
 from medre_bench.config.schema import ExperimentConfig
 from medre_bench.datasets.base import BaseDataset, RelationExample, apply_entity_markers
+from medre_bench.datasets.preprocessing import compute_class_weights, random_oversample
 from medre_bench.models.base import BaseREModel, get_entity_marker_tokens
 from medre_bench.registry import DATASET_REGISTRY, MODEL_REGISTRY
 from medre_bench.training.callbacks import ConfigSnapshotCallback, WandbExtrasCallback
@@ -87,11 +88,24 @@ class RETokenizedDataset(TorchDataset):
 class REModel(torch.nn.Module):
     """Wrapper that adapts BaseREModel to HuggingFace Trainer interface."""
 
-    def __init__(self, base_model: BaseREModel, num_labels: int):
+    def __init__(
+        self,
+        base_model: BaseREModel,
+        num_labels: int,
+        class_weights: list[float] | None = None,
+    ):
         super().__init__()
         self.base_model = base_model
         self.num_labels = num_labels
         self.config = base_model.encoder.config
+        if class_weights is not None:
+            self.register_buffer(
+                "class_weights",
+                torch.tensor(class_weights, dtype=torch.float32),
+                persistent=False,
+            )
+        else:
+            self.class_weights = None
 
     def state_dict(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         sd = super().state_dict(*args, **kwargs)
@@ -117,15 +131,18 @@ class REModel(torch.nn.Module):
         result = self.base_model(
             input_ids=input_ids,
             attention_mask=attention_mask,
-            labels=labels,
+            labels=labels if self.class_weights is None else None,
         )
-        # Return a namedtuple-like object compatible with Trainer
+
+        loss = result.get("loss")
+        logits = result["logits"]
+        if labels is not None and self.class_weights is not None:
+            loss_fn = torch.nn.CrossEntropyLoss(weight=self.class_weights.to(logits.device))
+            loss = loss_fn(logits, labels)
+
         from transformers.modeling_outputs import SequenceClassifierOutput
 
-        return SequenceClassifierOutput(
-            loss=result.get("loss"),
-            logits=result["logits"],
-        )
+        return SequenceClassifierOutput(loss=loss, logits=logits)
 
 
 def run_training(cfg: ExperimentConfig) -> dict[str, Any]:
@@ -163,9 +180,6 @@ def run_training(cfg: ExperimentConfig) -> dict[str, Any]:
     )
     logger.info(f"Model: {cfg.model.name} ({base_model.pretrained_model_name()})")
 
-    # Wrap for HF Trainer compatibility
-    model = REModel(base_model, num_labels=dataset.num_labels())
-
     # Load and tokenize data
     train_examples = dataset.load_split("train")
     eval_examples = dataset.load_split("validation")
@@ -175,7 +189,23 @@ def run_training(cfg: ExperimentConfig) -> dict[str, Any]:
     if cfg.dataset.max_eval_samples:
         eval_examples = eval_examples[: cfg.dataset.max_eval_samples]
 
+    # Compute class weights from raw (pre-resampling) train distribution
+    class_weights = None
+    if cfg.dataset.use_class_weights:
+        class_weights = compute_class_weights(train_examples, dataset.num_labels())
+        logger.info(f"Class weights: {class_weights}")
+
+    if cfg.dataset.balance_train:
+        before = len(train_examples)
+        train_examples = random_oversample(train_examples, seed=cfg.training.seed)
+        logger.info(
+            f"Random oversampling applied to train split: {before} -> {len(train_examples)}"
+        )
+
     logger.info(f"Train examples: {len(train_examples)}, Eval examples: {len(eval_examples)}")
+
+    # Wrap for HF Trainer compatibility
+    model = REModel(base_model, num_labels=dataset.num_labels(), class_weights=class_weights)
 
     train_dataset = RETokenizedDataset(
         train_examples,
