@@ -24,6 +24,14 @@ class DatasetConfig(BaseModel):
     name: str = Field(..., description="Registry key, e.g. 'chemprot'")
     max_train_samples: Optional[int] = Field(None, description="Limit training samples (for debugging)")
     max_eval_samples: Optional[int] = Field(None, description="Limit eval samples (for debugging)")
+    balance_train: bool = Field(
+        True,
+        description="Apply random oversampling to balance the train split's class distribution",
+    )
+    use_class_weights: bool = Field(
+        False,
+        description="Use inverse-frequency class weights in the loss (alternative/complement to oversampling)",
+    )
 
 
 class TrainingConfig(BaseModel):

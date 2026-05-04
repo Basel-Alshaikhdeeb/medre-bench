@@ -11,33 +11,62 @@ from sklearn.metrics import (
     f1_score,
     precision_score,
     recall_score,
+    roc_auc_score,
 )
+
+
+def _softmax(x: np.ndarray, axis: int = -1) -> np.ndarray:
+    x_max = np.max(x, axis=axis, keepdims=True)
+    e_x = np.exp(x - x_max)
+    return e_x / np.sum(e_x, axis=axis, keepdims=True)
 
 
 def compute_metrics(eval_pred: Any) -> dict[str, float]:
     """Compute metrics compatible with HuggingFace Trainer's compute_metrics callback.
 
     Args:
-        eval_pred: EvalPrediction with predictions and label_ids arrays.
+        eval_pred: EvalPrediction with predictions (logits) and label_ids arrays.
 
     Returns:
-        Dict of metric name -> value.
+        Dict of metric name -> value, including ROC-AUC (binary or one-vs-rest macro/weighted).
     """
     predictions, labels = eval_pred
     if predictions.ndim > 1:
+        probs = _softmax(predictions, axis=-1)
         preds = np.argmax(predictions, axis=-1)
     else:
+        probs = None
         preds = predictions
 
-    return {
+    metrics: dict[str, float] = {
         "micro_f1": f1_score(labels, preds, average="micro"),
         "macro_f1": f1_score(labels, preds, average="macro"),
-        "micro_precision": precision_score(labels, preds, average="micro"),
-        "micro_recall": recall_score(labels, preds, average="micro"),
-        "macro_precision": precision_score(labels, preds, average="macro"),
-        "macro_recall": recall_score(labels, preds, average="macro"),
+        "weighted_f1": f1_score(labels, preds, average="weighted"),
+        "micro_precision": precision_score(labels, preds, average="micro", zero_division=0),
+        "micro_recall": recall_score(labels, preds, average="micro", zero_division=0),
+        "macro_precision": precision_score(labels, preds, average="macro", zero_division=0),
+        "macro_recall": recall_score(labels, preds, average="macro", zero_division=0),
         "accuracy": accuracy_score(labels, preds),
     }
+
+    if probs is not None:
+        n_classes = probs.shape[-1]
+        present = np.unique(labels)
+        try:
+            if n_classes == 2:
+                metrics["roc_auc"] = roc_auc_score(labels, probs[:, 1])
+            elif len(present) >= 2:
+                metrics["roc_auc_macro"] = roc_auc_score(
+                    labels, probs, multi_class="ovr", average="macro", labels=np.arange(n_classes)
+                )
+                metrics["roc_auc_weighted"] = roc_auc_score(
+                    labels, probs, multi_class="ovr", average="weighted", labels=np.arange(n_classes)
+                )
+        except ValueError:
+            # Eval labels missing one or more classes; AUC undefined for those.
+            pass
+
+    return metrics
 
 
 def compute_per_class_metrics(

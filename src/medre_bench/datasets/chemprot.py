@@ -2,23 +2,24 @@
 
 from __future__ import annotations
 
-from medre_bench.datasets.base import BaseDataset, RelationExample, apply_entity_markers
+from medre_bench.datasets.base import BaseDataset, RelationExample
+from medre_bench.datasets.preprocessing import process_bigbio_kb_doc
 from medre_bench.registry import DATASET_REGISTRY
 
 # ChemProt relation classes (BioCreative VI evaluation groups)
+# "Not" serves as the no-relation label.
 _LABEL_NAMES = [
+    "Not",            # Negative / no relation
     "Upregulator",    # CPR:3
     "Downregulator",  # CPR:4
     "Agonist",        # CPR:5
     "Antagonist",     # CPR:6
     "Substrate",      # CPR:9
-    "Not",            # Negative / no relation
 ]
 
 _LABEL_TO_ID = {label: idx for idx, label in enumerate(_LABEL_NAMES)}
 
-# Additional relation types in the dataset mapped to evaluation groups
-_NORMALIZED_LABEL_MAP = {
+_LABEL_REMAP = {
     "Regulator": "Upregulator",
     "Cofactor": "Substrate",
     "Modulator": "Agonist",
@@ -26,7 +27,6 @@ _NORMALIZED_LABEL_MAP = {
     "Part_of": "Not",
 }
 
-# Map from split names to HuggingFace split keys
 _SPLIT_MAP = {
     "train": "train",
     "validation": "validation",
@@ -37,10 +37,7 @@ _SPLIT_MAP = {
 
 @DATASET_REGISTRY.register("chemprot")
 class ChemProtDataset(BaseDataset):
-    """ChemProt: BioCreative VI chemical-protein interaction dataset.
-
-    Uses the bigbio/chemprot dataset from HuggingFace.
-    """
+    """ChemProt: BioCreative VI chemical-protein interaction dataset."""
 
     HF_DATASET_ID = "bigbio/chemprot"
     HF_CONFIG = "chemprot_bigbio_kb"
@@ -61,63 +58,19 @@ class ChemProtDataset(BaseDataset):
         ds = load_dataset(self.HF_DATASET_ID, self.HF_CONFIG, split=hf_split, trust_remote_code=True)
 
         examples = []
-        seen_rel_types = set()
         for doc in ds:
-            text = " ".join([p["text"][0] for p in doc["passages"]])
-            entities_by_id = {}
-            for entity in doc["entities"]:
-                entities_by_id[entity["id"]] = {
-                    "text": entity["text"][0],
-                    "type": entity["type"],
-                    "start": entity["offsets"][0][0],
-                    "end": entity["offsets"][0][1],
-                }
-
-            for relation in doc["relations"]:
-                rel_type = relation["type"]
-                seen_rel_types.add(rel_type)
-
-                # Map to label ID, trying both raw type and normalized forms
-                label_id = None
-                if rel_type in _LABEL_TO_ID:
-                    label_id = _LABEL_TO_ID[rel_type]
-                elif rel_type in _NORMALIZED_LABEL_MAP:
-                    label_id = _LABEL_TO_ID[_NORMALIZED_LABEL_MAP[rel_type]]
-                    rel_type = _NORMALIZED_LABEL_MAP[rel_type]
-                else:
-                    continue
-
-                arg1_id = relation["arg1_id"]
-                arg2_id = relation["arg2_id"]
-
-                if arg1_id not in entities_by_id or arg2_id not in entities_by_id:
-                    continue
-
-                e1 = entities_by_id[arg1_id]
-                e2 = entities_by_id[arg2_id]
-
-                examples.append(
-                    RelationExample(
-                        text=text,
-                        entity1=e1["text"],
-                        entity1_type=e1["type"],
-                        entity1_start=e1["start"],
-                        entity1_end=e1["end"],
-                        entity2=e2["text"],
-                        entity2_type=e2["type"],
-                        entity2_start=e2["start"],
-                        entity2_end=e2["end"],
-                        label=rel_type,
-                        label_id=label_id,
-                        metadata={"doc_id": doc["id"]},
-                    )
+            examples.extend(
+                process_bigbio_kb_doc(
+                    doc=doc,
+                    label_to_id=_LABEL_TO_ID,
+                    no_relation_label="Not",
+                    label_remap=_LABEL_REMAP,
                 )
+            )
 
         if not examples:
             raise ValueError(
-                f"No examples loaded from {self.HF_DATASET_ID}/{self.HF_CONFIG} "
-                f"split={hf_split}. Relation types found in data: {seen_rel_types}. "
-                f"Expected types: {set(_LABEL_TO_ID.keys())}"
+                f"No examples loaded from {self.HF_DATASET_ID}/{self.HF_CONFIG} split={hf_split}."
             )
 
         return examples
