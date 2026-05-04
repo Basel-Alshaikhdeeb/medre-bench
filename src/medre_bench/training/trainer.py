@@ -15,7 +15,11 @@ from transformers import (
 
 from medre_bench.config.schema import ExperimentConfig
 from medre_bench.datasets.base import BaseDataset, RelationExample, apply_entity_markers
-from medre_bench.datasets.preprocessing import compute_class_weights, random_oversample
+from medre_bench.datasets.preprocessing import (
+    clean_with_tomek,
+    compute_class_weights,
+    random_oversample,
+)
 from medre_bench.models.base import BaseREModel, get_entity_marker_tokens
 from medre_bench.registry import DATASET_REGISTRY, MODEL_REGISTRY
 from medre_bench.training.callbacks import ConfigSnapshotCallback, WandbExtrasCallback
@@ -189,7 +193,24 @@ def run_training(cfg: ExperimentConfig) -> dict[str, Any]:
     if cfg.dataset.max_eval_samples:
         eval_examples = eval_examples[: cfg.dataset.max_eval_samples]
 
-    # Compute class weights from raw (pre-resampling) train distribution
+    # Boundary cleaning (Tomek Links) before computing weights / oversampling
+    if cfg.dataset.cleaning_strategy == "tomek":
+        cache_dir = cfg.dataset.cleaning_cache_dir or str(
+            (run_dir.parent / "_tomek_cache").resolve()
+        )
+        train_examples = clean_with_tomek(
+            train_examples,
+            entity_marker_strategy=cfg.model.entity_marker_strategy,
+            embedding_model=cfg.dataset.cleaning_embedding_model,
+            cache_dir=cache_dir,
+            cache_key=f"{cfg.dataset.name}_train",
+        )
+    elif cfg.dataset.cleaning_strategy != "none":
+        raise ValueError(
+            f"Unknown cleaning_strategy: {cfg.dataset.cleaning_strategy!r}; expected 'none' or 'tomek'"
+        )
+
+    # Compute class weights from cleaned (pre-resampling) train distribution
     class_weights = None
     if cfg.dataset.use_class_weights:
         class_weights = compute_class_weights(train_examples, dataset.num_labels())
