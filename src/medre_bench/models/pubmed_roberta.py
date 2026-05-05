@@ -7,4 +7,4 @@ from medre_bench.registry import MODEL_REGISTRY
 @MODEL_REGISTRY.register("pubmed-roberta")
 class PubMedRoBERTaModel(BaseREModel):
     def pretrained_model_name(self) -> str:
-        return "raynardj/pubmed-roberta-base"
+        return "raynardj/roberta-pubmed"
