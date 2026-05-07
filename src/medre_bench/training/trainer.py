@@ -8,6 +8,7 @@ from typing import Any
 import torch
 from torch.utils.data import Dataset as TorchDataset
 from transformers import (
+    DataCollatorWithPadding,
     EarlyStoppingCallback,
     Trainer,
     TrainingArguments,
@@ -32,7 +33,12 @@ logger = setup_logger(__name__)
 
 
 class RETokenizedDataset(TorchDataset):
-    """Tokenized relation extraction dataset for PyTorch DataLoader."""
+    """Tokenized relation extraction dataset for PyTorch DataLoader.
+
+    Stores variable-length tokenizations; pair with ``DataCollatorWithPadding``
+    so each batch is padded to the longest sequence rather than to
+    ``max_seq_length``. ``max_seq_length`` is still applied as a truncation cap.
+    """
 
     def __init__(
         self,
@@ -45,9 +51,9 @@ class RETokenizedDataset(TorchDataset):
         self.tokenizer = tokenizer
         self.max_seq_length = max_seq_length
         self.entity_marker_strategy = entity_marker_strategy
-        self._encodings = self._tokenize_all()
+        self._features = self._tokenize_all()
 
-    def _tokenize_all(self) -> dict[str, list]:
+    def _tokenize_all(self) -> list[dict[str, Any]]:
         texts = []
         labels = []
 
@@ -75,18 +81,26 @@ class RETokenizedDataset(TorchDataset):
         encodings = self.tokenizer(
             texts,
             max_length=self.max_seq_length,
-            padding="max_length",
+            padding=False,
             truncation=True,
-            return_tensors="pt",
         )
-        encodings["labels"] = torch.tensor(labels, dtype=torch.long)
-        return encodings
+        features: list[dict[str, Any]] = []
+        for i, label in enumerate(labels):
+            feat: dict[str, Any] = {
+                "input_ids": encodings["input_ids"][i],
+                "attention_mask": encodings["attention_mask"][i],
+                "labels": label,
+            }
+            if "token_type_ids" in encodings:
+                feat["token_type_ids"] = encodings["token_type_ids"][i]
+            features.append(feat)
+        return features
 
     def __len__(self) -> int:
-        return len(self.examples)
+        return len(self._features)
 
-    def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
-        return {key: val[idx] for key, val in self._encodings.items()}
+    def __getitem__(self, idx: int) -> dict[str, Any]:
+        return self._features[idx]
 
 
 class REModel(torch.nn.Module):
@@ -290,12 +304,20 @@ def run_training(cfg: ExperimentConfig) -> dict[str, Any]:
     if cfg.logging.use_wandb:
         callbacks.append(WandbExtrasCallback(label_names=dataset.label_names()))
 
+    # Dynamic padding: pad each batch to the longest sequence in that batch
+    data_collator = DataCollatorWithPadding(
+        tokenizer=base_model.tokenizer,
+        padding="longest",
+        pad_to_multiple_of=8 if cfg.training.fp16 else None,
+    )
+
     # Create trainer
     trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
+        data_collator=data_collator,
         compute_metrics=compute_metrics,
         callbacks=callbacks,
     )

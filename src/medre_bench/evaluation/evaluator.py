@@ -108,11 +108,16 @@ def run_evaluation(
     model.to(device)
     model.eval()
 
-    # Tokenize
+    # Tokenize (variable-length; collator pads each batch to its longest sequence)
+    from transformers import DataCollatorWithPadding
+
     eval_dataset = RETokenizedDataset(
         examples, tokenizer, max_seq_length, entity_marker_strategy
     )
-    dataloader = DataLoader(eval_dataset, batch_size=batch_size, shuffle=False)
+    data_collator = DataCollatorWithPadding(tokenizer=tokenizer, padding="longest")
+    dataloader = DataLoader(
+        eval_dataset, batch_size=batch_size, shuffle=False, collate_fn=data_collator
+    )
 
     # Run inference
     all_preds = []
