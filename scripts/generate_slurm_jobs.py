@@ -36,7 +36,6 @@ ENV_SETUP = """\
 # --- Environment setup (edit for your HPC site) -----------------------------
 set -euo pipefail
 module load env/development/2024a
-module load env/development/2025a
 module load env/release/2023b
 module load env/release/default
 module load system/CUDA/12.6.0
