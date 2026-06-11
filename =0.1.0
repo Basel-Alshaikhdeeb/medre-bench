@@ -1,0 +1,6 @@
+Collecting ruff
+  Downloading ruff-0.15.12-py3-none-macosx_10_12_x86_64.whl.metadata (26 kB)
+Downloading ruff-0.15.12-py3-none-macosx_10_12_x86_64.whl (11.1 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 11.1/11.1 MB 80.8 MB/s  0:00:00
+Installing collected packages: ruff
+Successfully installed ruff-0.15.12

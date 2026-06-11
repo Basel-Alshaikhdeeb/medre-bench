@@ -17,7 +17,9 @@ from transformers import (
 from medre_bench.config.schema import ExperimentConfig
 from medre_bench.datasets.base import BaseDataset, RelationExample, apply_entity_markers
 from medre_bench.datasets.preprocessing import (
+    BINARY_LABEL_NAMES,
     clean_with_tomek,
+    collapse_to_binary,
     compute_class_weights,
     random_oversample,
 )
@@ -185,19 +187,6 @@ def run_training(cfg: ExperimentConfig) -> dict[str, Any]:
     dataset: BaseDataset = dataset_cls()
     logger.info(f"Dataset: {dataset.name()} ({dataset.num_labels()} labels)")
 
-    # Load model
-    import medre_bench.models  # noqa: F401 - trigger registration
-    model_cls = MODEL_REGISTRY.get(cfg.model.name)
-    base_model: BaseREModel = model_cls()
-
-    # Build model with entity markers
-    entity_marker_tokens = get_entity_marker_tokens(cfg.model.entity_marker_strategy)
-    base_model.build(
-        num_labels=dataset.num_labels(),
-        entity_marker_tokens=entity_marker_tokens if entity_marker_tokens else None,
-    )
-    logger.info(f"Model: {cfg.model.name} ({base_model.pretrained_model_name()})")
-
     # Load and tokenize data
     train_examples = dataset.load_split("train")
     eval_examples = dataset.load_split("validation")
@@ -206,6 +195,35 @@ def run_training(cfg: ExperimentConfig) -> dict[str, Any]:
         train_examples = train_examples[: cfg.dataset.max_train_samples]
     if cfg.dataset.max_eval_samples:
         eval_examples = eval_examples[: cfg.dataset.max_eval_samples]
+
+    # Optional binary collapse: all classes != 0 (the no-relation index) -> 1.
+    # Applied before Tomek/class-weights/ROS so they see the binary distribution.
+    if cfg.dataset.binary_mode:
+        original_neg = dataset.label_names()[0]
+        train_examples = collapse_to_binary(train_examples)
+        eval_examples = collapse_to_binary(eval_examples)
+        num_labels = 2
+        label_names = list(BINARY_LABEL_NAMES)
+        logger.info(
+            f"binary_mode=True: collapsed {dataset.num_labels()} classes to 2 "
+            f"(no-relation source: {original_neg!r})"
+        )
+    else:
+        num_labels = dataset.num_labels()
+        label_names = dataset.label_names()
+
+    # Load model
+    import medre_bench.models  # noqa: F401 - trigger registration
+    model_cls = MODEL_REGISTRY.get(cfg.model.name)
+    base_model: BaseREModel = model_cls()
+
+    # Build model with entity markers
+    entity_marker_tokens = get_entity_marker_tokens(cfg.model.entity_marker_strategy)
+    base_model.build(
+        num_labels=num_labels,
+        entity_marker_tokens=entity_marker_tokens if entity_marker_tokens else None,
+    )
+    logger.info(f"Model: {cfg.model.name} ({base_model.pretrained_model_name()})")
 
     # Boundary cleaning (Tomek Links) before computing weights / oversampling
     if cfg.dataset.cleaning_strategy == "tomek":
@@ -227,7 +245,7 @@ def run_training(cfg: ExperimentConfig) -> dict[str, Any]:
     # Compute class weights from cleaned (pre-resampling) train distribution
     class_weights = None
     if cfg.dataset.use_class_weights:
-        class_weights = compute_class_weights(train_examples, dataset.num_labels())
+        class_weights = compute_class_weights(train_examples, num_labels)
         logger.info(f"Class weights: {class_weights}")
 
     if cfg.dataset.balance_train:
@@ -240,7 +258,7 @@ def run_training(cfg: ExperimentConfig) -> dict[str, Any]:
     logger.info(f"Train examples: {len(train_examples)}, Eval examples: {len(eval_examples)}")
 
     # Wrap for HF Trainer compatibility
-    model = REModel(base_model, num_labels=dataset.num_labels(), class_weights=class_weights)
+    model = REModel(base_model, num_labels=num_labels, class_weights=class_weights)
 
     train_dataset = RETokenizedDataset(
         train_examples,
@@ -302,7 +320,7 @@ def run_training(cfg: ExperimentConfig) -> dict[str, Any]:
     if save_ckpt:
         callbacks.append(EarlyStoppingCallback(early_stopping_patience=cfg.training.early_stopping_patience))
     if cfg.logging.use_wandb:
-        callbacks.append(WandbExtrasCallback(label_names=dataset.label_names()))
+        callbacks.append(WandbExtrasCallback(label_names=label_names))
 
     # Dynamic padding: pad each batch to the longest sequence in that batch
     data_collator = DataCollatorWithPadding(

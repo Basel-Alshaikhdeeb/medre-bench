@@ -19,7 +19,24 @@ logger = logging.getLogger(__name__)
 
 NO_RELATION = "NO_RELATION"
 
+BINARY_LABEL_NAMES = ["NO_RELATION", "RELATION"]
+
 _SENTENCE_PATTERN = re.compile(r"(?<=[.!?])\s+(?=[A-Z(\[])")
+
+
+def collapse_to_binary(examples: list[RelationExample]) -> list[RelationExample]:
+    """Collapse multi-class labels to binary (0=no-relation, 1=any relation).
+
+    Relies on every dataset placing its no-relation class at ``label_id == 0``.
+    Returns new RelationExample instances; inputs are not mutated.
+    """
+    from dataclasses import replace
+
+    out: list[RelationExample] = []
+    for ex in examples:
+        new_id = 0 if ex.label_id == 0 else 1
+        out.append(replace(ex, label=BINARY_LABEL_NAMES[new_id], label_id=new_id))
+    return out
 
 
 def split_into_sentences(text: str) -> list[tuple[int, int]]:

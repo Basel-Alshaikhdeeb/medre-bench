@@ -28,6 +28,10 @@ class DatasetConfig(BaseModel):
         True,
         description="Apply random oversampling to balance the train split's class distribution",
     )
+    binary_mode: bool = Field(
+        False,
+        description="Collapse labels to binary (0=NO_RELATION, 1=any relation) before balancing/Tomek",
+    )
     use_class_weights: bool = Field(
         False,
         description="Use inverse-frequency class weights in the loss (alternative/complement to oversampling)",

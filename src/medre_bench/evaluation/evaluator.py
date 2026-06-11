@@ -66,6 +66,19 @@ def run_evaluation(
     examples = dataset.load_split(split)
     logger.info(f"Loaded {len(examples)} examples from {dataset_name}/{split}")
 
+    # Mirror the trainer's binary collapse so labels match the checkpoint's head
+    binary_mode = bool(saved_config.get("dataset", {}).get("binary_mode", False)) if config_path.exists() else False
+    if binary_mode:
+        from medre_bench.datasets.preprocessing import BINARY_LABEL_NAMES, collapse_to_binary
+
+        examples = collapse_to_binary(examples)
+        num_labels = 2
+        label_names = list(BINARY_LABEL_NAMES)
+        logger.info("binary_mode=True from config snapshot: collapsed eval labels to 2 classes")
+    else:
+        num_labels = dataset.num_labels()
+        label_names = dataset.label_names()
+
     # Load tokenizer and model
     from transformers import AutoTokenizer
 
@@ -98,12 +111,12 @@ def run_evaluation(
 
     entity_marker_tokens = get_entity_marker_tokens(entity_marker_strategy)
     base_model.build(
-        num_labels=dataset.num_labels(),
+        num_labels=num_labels,
         entity_marker_tokens=entity_marker_tokens if entity_marker_tokens else None,
     )
     base_model.tokenizer = tokenizer
 
-    model = REModel(base_model, num_labels=dataset.num_labels())
+    model = REModel(base_model, num_labels=num_labels)
     model.load_state_dict(model_state, strict=False)
     model.to(device)
     model.eval()
@@ -150,7 +163,7 @@ def run_evaluation(
     metrics = _compute(eval_pred)
 
     # Per-class metrics
-    per_class = compute_per_class_metrics(all_labels, all_preds, dataset.label_names())
+    per_class = compute_per_class_metrics(all_labels, all_preds, label_names)
     metrics["per_class"] = per_class["per_class"]
 
     logger.info(f"Results on {dataset_name}/{split}:")

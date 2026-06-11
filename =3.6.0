@@ -1,0 +1,35 @@
+Collecting pre-commit
+  Downloading pre_commit-4.6.0-py2.py3-none-any.whl.metadata (1.2 kB)
+Collecting cfgv>=2.0.0 (from pre-commit)
+  Using cached cfgv-3.5.0-py2.py3-none-any.whl.metadata (8.9 kB)
+Collecting identify>=1.0.0 (from pre-commit)
+  Downloading identify-2.6.19-py2.py3-none-any.whl.metadata (4.4 kB)
+Collecting nodeenv>=0.11.1 (from pre-commit)
+  Using cached nodeenv-1.10.0-py2.py3-none-any.whl.metadata (24 kB)
+Requirement already satisfied: pyyaml>=5.1 in /Users/basel.alshaikhdeeb/anaconda3/envs/HRS/lib/python3.10/site-packages (from pre-commit) (6.0.2)
+Collecting virtualenv>=20.10.0 (from pre-commit)
+  Downloading virtualenv-21.3.0-py3-none-any.whl.metadata (3.5 kB)
+Collecting distlib<1,>=0.3.7 (from virtualenv>=20.10.0->pre-commit)
+  Using cached distlib-0.4.0-py2.py3-none-any.whl.metadata (5.2 kB)
+Collecting filelock<4,>=3.24.2 (from virtualenv>=20.10.0->pre-commit)
+  Downloading filelock-3.29.0-py3-none-any.whl.metadata (2.0 kB)
+Requirement already satisfied: platformdirs<5,>=3.9.1 in /Users/basel.alshaikhdeeb/anaconda3/envs/HRS/lib/python3.10/site-packages (from virtualenv>=20.10.0->pre-commit) (4.3.8)
+Collecting python-discovery>=1.2.2 (from virtualenv>=20.10.0->pre-commit)
+  Downloading python_discovery-1.2.2-py3-none-any.whl.metadata (5.4 kB)
+Requirement already satisfied: typing-extensions>=4.13.2 in /Users/basel.alshaikhdeeb/anaconda3/envs/HRS/lib/python3.10/site-packages (from virtualenv>=20.10.0->pre-commit) (4.15.0)
+Downloading pre_commit-4.6.0-py2.py3-none-any.whl (226 kB)
+Using cached cfgv-3.5.0-py2.py3-none-any.whl (7.4 kB)
+Downloading identify-2.6.19-py2.py3-none-any.whl (99 kB)
+Using cached nodeenv-1.10.0-py2.py3-none-any.whl (23 kB)
+Downloading virtualenv-21.3.0-py3-none-any.whl (7.6 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 7.6/7.6 MB 65.0 MB/s  0:00:00
+Using cached distlib-0.4.0-py2.py3-none-any.whl (469 kB)
+Downloading filelock-3.29.0-py3-none-any.whl (39 kB)
+Downloading python_discovery-1.2.2-py3-none-any.whl (31 kB)
+Installing collected packages: distlib, nodeenv, identify, filelock, cfgv, python-discovery, virtualenv, pre-commit
+  Attempting uninstall: filelock
+    Found existing installation: filelock 3.19.1
+    Uninstalling filelock-3.19.1:
+      Successfully uninstalled filelock-3.19.1
+
+Successfully installed cfgv-3.5.0 distlib-0.4.0 filelock-3.29.0 identify-2.6.19 nodeenv-1.10.0 pre-commit-4.6.0 python-discovery-1.2.2 virtualenv-21.3.0

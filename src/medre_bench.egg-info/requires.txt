@@ -1,6 +1,11 @@
 torch>=2.1.0
-transformers>=4.36.0
-datasets>=2.16.0
+torchvision>=0.16.0
+transformers<4.45.0,>=4.36.0
+huggingface_hub<0.27.0,>=0.20.0
+datasets<3.0.0,>=2.21.0
+bioc>=2.0
+sacremoses>=0.0.53
+sentence-transformers>=2.7.0
 accelerate>=0.25.0
 omegaconf>=2.3.0
 pydantic>=2.5.0
@@ -18,6 +23,9 @@ pytest-cov>=4.1.0
 ruff>=0.1.0
 mypy>=1.7.0
 pre-commit>=3.6.0
+
+[gpu]
+deepspeed>=0.14.0
 
 [notebooks]
 jupyter>=1.0.0
