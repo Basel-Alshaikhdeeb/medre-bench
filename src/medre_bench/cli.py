@@ -81,6 +81,108 @@ def evaluate(
 
 
 @app.command()
+def predict(
+    checkpoint: str = typer.Option(..., "--checkpoint", help="Path to a saved checkpoint directory (contains model.safetensors and tokenizer files)"),
+    text: str = typer.Option(..., "--text", "-t", help="Sentence or multi-sentence text to score"),
+    entity1: str = typer.Option(..., "--entity1", "-e1", help="Text of the first entity (case-insensitive substring match)"),
+    entity2: str = typer.Option(..., "--entity2", "-e2", help="Text of the second entity"),
+    entity1_type: str = typer.Option("ENTITY", "--entity1-type", help="Type label used inside the entity marker for entity1"),
+    entity2_type: str = typer.Option("ENTITY", "--entity2-type", help="Type label used inside the entity marker for entity2"),
+    top_k: int = typer.Option(5, "--top-k", "-k", help="Number of multi-class labels to display per sentence"),
+    output_json: bool = typer.Option(False, "--json", help="Emit the full result as JSON instead of a human-readable summary"),
+) -> None:
+    """Predict whether text contains a relation between two entities.
+
+    Splits the text into sentences, locates both entities in each, and scores
+    every sentence that contains both. Prints a binary RELATION / NO_RELATION
+    decision plus the top-k multi-class labels per sentence, and an aggregate
+    document-level decision.
+    """
+    from medre_bench.inference.predictor import run_prediction
+
+    result = run_prediction(
+        checkpoint_path=checkpoint,
+        text=text,
+        entity1=entity1,
+        entity2=entity2,
+        entity1_type=entity1_type,
+        entity2_type=entity2_type,
+        top_k=top_k,
+    )
+
+    if output_json:
+        typer.echo(json.dumps(result, indent=2))
+        return
+
+    doc = result["document_prediction"]
+    typer.echo(
+        f"Model: {result['model_name']} | Dataset: {result['dataset_name']} "
+        f"| binary_mode_checkpoint: {result['binary_mode_checkpoint']}"
+    )
+    typer.echo(f"Entities: {entity1!r} <-> {entity2!r}")
+    typer.echo(
+        f"Document decision: {doc['binary']} "
+        f"(max P(relation)={doc['max_p_relation']:.4f}; "
+        f"{doc['n_matched_sentences']}/{doc['n_total_sentences']} sentences matched)"
+    )
+
+    if not result["sentence_predictions"]:
+        typer.echo("\nNo sentence contained both entities; no scoring performed.")
+        return
+
+    for i, p in enumerate(result["sentence_predictions"], 1):
+        typer.echo(f"\n--- Sentence {i} ---")
+        typer.echo(f"  {p['sentence']}")
+        typer.echo(f"  binary: {p['binary']}   P(relation)={p['p_relation']:.4f}")
+        typer.echo(f"  top-{len(p['top_k'])} labels:")
+        for row in p["top_k"]:
+            typer.echo(f"    - {row['label']:<28} {row['prob']:.4f}")
+
+
+@app.command(name="evaluate-aggregate")
+def evaluate_aggregate(
+    checkpoint: str = typer.Option(..., "--checkpoint", help="Path to an aggregate-trained checkpoint directory"),
+    split: str = typer.Option("test", "--split", "-s", help="Split to evaluate on each source ('validation' or 'test')"),
+    sources: Optional[str] = typer.Option(None, "--sources", help="Comma-separated subset of source datasets; default = all 7 sources"),
+    batch_size: int = typer.Option(32, "--batch-size", help="Inference batch size"),
+    output_dir: Optional[str] = typer.Option(None, "--output-dir", "-o", help="Directory to save per-source metrics JSON"),
+) -> None:
+    """Evaluate an aggregate-trained checkpoint on each source dataset's own split.
+
+    Ground truth and prediction are collapsed to binary (any relation vs
+    NO_RELATION) so the results are directly comparable to the per-dataset
+    baseline models. Reports per-source binary micro/macro F1 + a pooled
+    'combined' row over all scored examples.
+    """
+    from medre_bench.evaluation.aggregate_eval import run_aggregate_evaluation
+
+    source_list = [s.strip() for s in sources.split(",")] if sources else None
+    result = run_aggregate_evaluation(
+        checkpoint_path=checkpoint,
+        split=split,
+        sources=source_list,
+        batch_size=batch_size,
+        output_dir=output_dir,
+    )
+
+    header = f"{'source':<18}  {'n':>6}  {'micro_f1':>9}  {'macro_f1':>9}  {'P(+)':>7}  {'R(+)':>7}  {'F1(+)':>7}"
+    typer.echo(header)
+    typer.echo("-" * len(header))
+    for name, m in result["per_source"].items():
+        typer.echo(
+            f"{name:<18}  {m['n']:>6d}  {m['micro_f1']:>9.4f}  {m['macro_f1']:>9.4f}  "
+            f"{m['precision_positive']:>7.4f}  {m['recall_positive']:>7.4f}  {m['f1_positive']:>7.4f}"
+        )
+    c = result.get("combined") or {}
+    if c:
+        typer.echo("-" * len(header))
+        typer.echo(
+            f"{'combined':<18}  {c['n']:>6d}  {c['micro_f1']:>9.4f}  {c['macro_f1']:>9.4f}  "
+            f"{c['precision_positive']:>7.4f}  {c['recall_positive']:>7.4f}  {c['f1_positive']:>7.4f}"
+        )
+
+
+@app.command()
 def sweep(
     models: str = typer.Option(..., "--models", help="Comma-separated model registry keys"),
     datasets: str = typer.Option(..., "--datasets", help="Comma-separated dataset registry keys"),
