@@ -14,6 +14,7 @@ src/medre_bench/config/__init__.py
 src/medre_bench/config/loader.py
 src/medre_bench/config/schema.py
 src/medre_bench/datasets/__init__.py
+src/medre_bench/datasets/aggregate.py
 src/medre_bench/datasets/base.py
 src/medre_bench/datasets/bc5cdr.py
 src/medre_bench/datasets/biored.py
@@ -25,8 +26,11 @@ src/medre_bench/datasets/euadr.py
 src/medre_bench/datasets/gad.py
 src/medre_bench/datasets/preprocessing.py
 src/medre_bench/evaluation/__init__.py
+src/medre_bench/evaluation/aggregate_eval.py
 src/medre_bench/evaluation/analysis.py
 src/medre_bench/evaluation/evaluator.py
+src/medre_bench/inference/__init__.py
+src/medre_bench/inference/predictor.py
 src/medre_bench/models/__init__.py
 src/medre_bench/models/base.py
 src/medre_bench/models/bert_base.py
