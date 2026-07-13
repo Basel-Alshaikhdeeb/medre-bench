@@ -53,7 +53,7 @@ class EuADRDataset(BaseDataset):
     def _load_all(self) -> list[RelationExample]:
         from datasets import load_dataset
 
-        ds = load_dataset("bigbio/euadr", name="euadr_source", split="train")
+        ds = load_dataset("bigbio/euadr", name="euadr_source", split="train", trust_remote_code=True)
 
         examples: list[RelationExample] = []
         for row in ds:
