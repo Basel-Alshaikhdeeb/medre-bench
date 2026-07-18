@@ -25,11 +25,19 @@ _LABEL_NAMES = [
 
 _LABEL_TO_ID = {label: idx for idx, label in enumerate(_LABEL_NAMES)}
 
+# BigBio's bigbio/drugprot ships only train / validation / test_background.
+# The BioCreative VII organizers never released a labeled 'test' split -
+# it was held privately for shared-task ranking. To keep DrugProt present in
+# any evaluation loop that asks for split='test', we alias it to validation.
+# test_background is intentionally NOT used as the alias: it is unlabeled
+# (all pairs would score as NO_RELATION ground truth), which would inflate
+# precision on the positive class to 0 and make the run meaningless.
 _SPLIT_MAP = {
     "train": "train",
     "validation": "validation",
     "dev": "validation",
-    "test": "test",
+    "test": "validation",
+    "test_background": "test_background",
 }
 
 

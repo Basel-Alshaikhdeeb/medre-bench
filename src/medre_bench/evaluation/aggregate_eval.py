@@ -178,10 +178,19 @@ def run_aggregate_evaluation(
             logger.warning(f"Source {ds_name!r} not registered; skipping")
             continue
         source: BaseDataset = source_cls()
+        # DrugProt has no labeled test split; the adapter aliases test -> validation.
+        # Flag this to the user so the report row isn't silently mislabeled.
+        effective_split = split
+        if ds_name == "drugprot" and split == "test":
+            logger.info(
+                "drugprot has no labeled 'test' split; scoring on 'validation' instead "
+                "(BigBio does not ship the shared-task test set)."
+            )
+            effective_split = "validation"
         try:
-            raw = source.load_split(split)
+            raw = source.load_split(effective_split)
         except Exception as exc:  # noqa: BLE001
-            logger.warning(f"Could not load {ds_name}/{split}: {exc}")
+            logger.warning(f"Could not load {ds_name}/{effective_split}: {exc}")
             continue
 
         y_true_bin: list[int] = []
