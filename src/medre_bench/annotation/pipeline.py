@@ -166,67 +166,51 @@ def _combine(
     }
 
 
-def run_annotation(
-    input_path: str,
-    output_path: str | None,
-    best_models_path: str,
-    batch_size: int = 32,
-    device: str = "auto",
-    provider: str = "LCSB",
-    single_checkpoint_at_a_time: bool = False,
-) -> str:
-    """Annotate the BioC file with relation predictions and write the result.
-
-    Returns the resolved output path.
-    """
-    input_p = Path(input_path).expanduser().resolve()
-    if not input_p.exists():
-        raise FileNotFoundError(f"Input JSON not found: {input_p}")
-
-    if output_path:
-        output_p = Path(output_path).expanduser().resolve()
-    else:
-        output_p = input_p.with_name(f"{input_p.stem}_annotated{input_p.suffix}")
-
-    best_models_p = Path(best_models_path).expanduser().resolve()
-    best_models_map = yaml.safe_load(best_models_p.read_text()) or {}
-    if not isinstance(best_models_map, dict) or "aggregate" not in best_models_map:
+def _load_best_models(best_models_path: str) -> dict[str, str]:
+    """Read best_models.yaml and validate its shape."""
+    p = Path(best_models_path).expanduser().resolve()
+    payload = yaml.safe_load(p.read_text()) or {}
+    if not isinstance(payload, dict) or "aggregate" not in payload:
         raise ValueError(
-            f"{best_models_p}: expected a mapping with at least an 'aggregate' key"
+            f"{p}: expected a mapping with at least an 'aggregate' key"
         )
+    return payload
 
-    # 1. Parse input
-    raw = load_bioc(input_p)
+
+def _annotate_raw(
+    raw: dict,
+    pool: ModelPool,
+    best_models_map: dict[str, str],
+    provider: str,
+    batch_size: int,
+) -> int:
+    """Score every candidate pair in ``raw`` and mutate its passages' ``relations[]``.
+
+    Returns the number of relation entries emitted. Does NOT save the file —
+    the caller is responsible for writing ``raw`` back to disk.
+
+    This is the reusable core; ``run_annotation`` (single file) and
+    ``run_annotation_batch`` (directory) both call it after they have
+    a live :class:`ModelPool`.
+    """
     passages = iter_passages(raw)
     total_entities = sum(len(p.entities) for p in passages)
     logger.info(
-        f"loaded {len(passages)} passages, {total_entities} biomedical entities "
-        f"(after dropping non-biomedical annotations)"
+        f"loaded {len(passages)} passages, {total_entities} biomedical entities"
     )
 
-    # 2. Enumerate pairs
     all_pairs: list[Pair] = []
     for p in passages:
         all_pairs.extend(enumerate_pairs(p))
-    logger.info(f"enumerated {len(all_pairs)} candidate pairs across sentences")
+    logger.info(f"enumerated {len(all_pairs)} candidate pairs")
     if not all_pairs:
-        # Nothing to score; still write out the file so downstream tools see it.
-        save_bioc(raw, output_p)
-        logger.info(f"no candidate pairs; wrote input verbatim to {output_p}")
-        return str(output_p)
+        return 0
 
-    # 3. Model pool
-    pool = ModelPool(
-        paths=best_models_map,
-        device_preference=device,
-        single_at_a_time=single_checkpoint_at_a_time,
-    )
-
-    # 4. Tier-1: score every pair with the aggregate model
+    # Tier 1
     aggregate = pool.get("aggregate")
     tier1_probs = _score_pairs(all_pairs, aggregate, batch_size, desc="tier1:aggregate")
 
-    # 5. Tier-2: for each dataset in the routing table, score every pair that routes to it
+    # Tier 2: for each configured per-dataset model, score all pairs routed to it.
     tier2_probs: dict[int, dict[str, tuple[LoadedModel, np.ndarray]]] = defaultdict(dict)
     for ds_key in ["bc5cdr", "chem_dis_gene", "biored", "euadr", "ddi", "chemprot", "drugprot"]:
         if ds_key not in best_models_map:
@@ -243,19 +227,16 @@ def run_annotation(
             continue
         loaded = pool.get(ds_key)
         pairs_only = [pair for _, pair in targets]
-        probs = _score_pairs(
-            pairs_only, loaded, batch_size, desc=f"tier2:{ds_key}"
-        )
+        probs = _score_pairs(pairs_only, loaded, batch_size, desc=f"tier2:{ds_key}")
         for (idx, _), row in zip(targets, probs):
             tier2_probs[idx][ds_key] = (loaded, row)
 
-    # 6. Combine + emit; then dedup unordered pairs
+    # Combine + dedup (A,B) vs (B,A)
     dedup: dict[tuple[str, int, tuple[str, str]], tuple[dict[str, Any], Pair]] = {}
     for i, pair in enumerate(all_pairs):
         entry = _combine(pair, tier1_probs[i], tier2_probs.get(i, {}))
         if entry is None:
             continue
-        # Unordered dedup key: (doc, passage_offset, sorted-entity-ids)
         u_key = (
             pair.passage.document_id,
             pair.passage.doc_offset,
@@ -267,11 +248,10 @@ def run_annotation(
 
     logger.info(
         f"emitting {len(dedup)} relation entries "
-        f"(from {len(all_pairs)} ordered candidates, deduped unordered)"
+        f"(from {len(all_pairs)} ordered candidates)"
     )
 
-    # 7. Attach to each passage's relations[] in place
-    for u_key, (entry, pair) in dedup.items():
+    for _, (entry, pair) in dedup.items():
         rel = {
             "id": _rel_id(pair),
             "entity1_id": pair.e1.ann_id,
@@ -284,6 +264,185 @@ def run_annotation(
         }
         pair.passage.raw.setdefault("relations", []).append(rel)
 
+    return len(dedup)
+
+
+def run_annotation(
+    input_path: str,
+    output_path: str | None,
+    best_models_path: str,
+    batch_size: int = 32,
+    device: str = "auto",
+    provider: str = "LCSB",
+    single_checkpoint_at_a_time: bool = False,
+) -> str:
+    """Annotate a single BioC file. Returns the resolved output path."""
+    input_p = Path(input_path).expanduser().resolve()
+    if not input_p.exists():
+        raise FileNotFoundError(f"Input JSON not found: {input_p}")
+    if output_path:
+        output_p = Path(output_path).expanduser().resolve()
+    else:
+        output_p = input_p.with_name(f"{input_p.stem}_annotated{input_p.suffix}")
+
+    best_models_map = _load_best_models(best_models_path)
+    pool = ModelPool(
+        paths=best_models_map,
+        device_preference=device,
+        single_at_a_time=single_checkpoint_at_a_time,
+    )
+    raw = load_bioc(input_p)
+    n_emitted = _annotate_raw(raw, pool, best_models_map, provider, batch_size)
     save_bioc(raw, output_p)
-    logger.info(f"wrote annotated BioC to {output_p}")
+    logger.info(f"wrote annotated BioC to {output_p} ({n_emitted} relations)")
     return str(output_p)
+
+
+def _discover_inputs(input_dir: Path, pattern: str, recursive: bool) -> list[Path]:
+    """List JSON files under ``input_dir`` matching ``pattern``."""
+    if recursive:
+        files = sorted(input_dir.rglob(pattern))
+    else:
+        files = sorted(input_dir.glob(pattern))
+    return [f for f in files if f.is_file()]
+
+
+def run_annotation_batch(
+    input_dir: str,
+    output_dir: str,
+    best_models_path: str,
+    batch_size: int = 32,
+    device: str = "auto",
+    provider: str = "LCSB",
+    single_checkpoint_at_a_time: bool = False,
+    pattern: str = "*.json",
+    recursive: bool = True,
+    force: bool = False,
+    continue_on_error: bool = True,
+) -> dict[str, Any]:
+    """Annotate every JSON file under ``input_dir`` and write outputs to
+    ``output_dir``, mirroring the input tree.
+
+    Models are loaded **once** for the whole batch — the primary reason to use
+    this over a shell loop that calls the single-file command per file.
+
+    Args:
+        input_dir: Root directory of BioC JSON files.
+        output_dir: Root directory for outputs; created if missing. Input tree
+            is mirrored beneath it.
+        best_models_path: Path to best_models.yaml.
+        batch_size: Inference batch size per model.
+        device: 'auto' / 'cuda' / 'mps' / 'cpu'.
+        provider: Provider string written into every emitted relation.
+        single_checkpoint_at_a_time: Evict each model before loading the next
+            (lower peak memory, slower).
+        pattern: Glob pattern for input file discovery. Default ``*.json``.
+        recursive: If True, walk subdirectories.
+        force: If True, re-annotate files whose output already exists.
+        continue_on_error: If True, log per-file exceptions and keep going.
+            If False, the first failing file re-raises.
+
+    Returns:
+        Summary dict::
+
+            {
+                "input_dir": ..., "output_dir": ...,
+                "total": int,        # files discovered
+                "processed": int,    # files annotated this run
+                "skipped": int,      # skipped because output exists (and not --force)
+                "failed": int,
+                "relations_emitted": int,  # sum across processed files
+                "failures": [{"input": path, "error": message}],
+            }
+    """
+    in_root = Path(input_dir).expanduser().resolve()
+    out_root = Path(output_dir).expanduser().resolve()
+    if not in_root.is_dir():
+        raise NotADirectoryError(f"input_dir is not a directory: {in_root}")
+    out_root.mkdir(parents=True, exist_ok=True)
+
+    files = _discover_inputs(in_root, pattern, recursive)
+    logger.info(
+        f"discovered {len(files)} file(s) under {in_root} "
+        f"(pattern={pattern!r}, recursive={recursive})"
+    )
+    if not files:
+        return {
+            "input_dir": str(in_root), "output_dir": str(out_root),
+            "total": 0, "processed": 0, "skipped": 0, "failed": 0,
+            "relations_emitted": 0, "failures": [],
+        }
+
+    best_models_map = _load_best_models(best_models_path)
+    pool = ModelPool(
+        paths=best_models_map,
+        device_preference=device,
+        single_at_a_time=single_checkpoint_at_a_time,
+    )
+
+    processed = skipped = failed = 0
+    relations_emitted = 0
+    failures: list[dict[str, str]] = []
+
+    for src in tqdm(files, desc="files", leave=True):
+        rel = src.relative_to(in_root)
+        dst = out_root / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+
+        if dst.exists() and not force:
+            skipped += 1
+            logger.info(f"skip (output exists): {rel}")
+            continue
+
+        try:
+            raw = load_bioc(src)
+        except Exception as exc:  # noqa: BLE001
+            failed += 1
+            msg = f"parse failed: {type(exc).__name__}: {exc}"
+            failures.append({"input": str(src), "error": msg})
+            logger.warning(f"{rel}: {msg}")
+            if not continue_on_error:
+                raise
+            continue
+
+        try:
+            n_emitted = _annotate_raw(raw, pool, best_models_map, provider, batch_size)
+        except Exception as exc:  # noqa: BLE001
+            failed += 1
+            msg = f"annotation failed: {type(exc).__name__}: {exc}"
+            failures.append({"input": str(src), "error": msg})
+            logger.warning(f"{rel}: {msg}")
+            if not continue_on_error:
+                raise
+            continue
+
+        try:
+            save_bioc(raw, dst)
+        except Exception as exc:  # noqa: BLE001
+            failed += 1
+            msg = f"write failed ({dst}): {type(exc).__name__}: {exc}"
+            failures.append({"input": str(src), "error": msg})
+            logger.warning(f"{rel}: {msg}")
+            if not continue_on_error:
+                raise
+            continue
+
+        processed += 1
+        relations_emitted += n_emitted
+        logger.info(f"{rel} -> {dst.relative_to(out_root)}  ({n_emitted} relations)")
+
+    summary = {
+        "input_dir": str(in_root),
+        "output_dir": str(out_root),
+        "total": len(files),
+        "processed": processed,
+        "skipped": skipped,
+        "failed": failed,
+        "relations_emitted": relations_emitted,
+        "failures": failures,
+    }
+    logger.info(
+        f"batch done: {processed} processed, {skipped} skipped, {failed} failed "
+        f"(of {len(files)} discovered); {relations_emitted} total relations emitted"
+    )
+    return summary

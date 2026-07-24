@@ -141,38 +141,76 @@ def predict(
 
 @app.command()
 def annotate(
-    input_path: str = typer.Option(..., "--input", "-i", help="Input BioC JSON file to annotate with relations"),
-    output_path: Optional[str] = typer.Option(None, "--output", "-o", help="Output JSON path; defaults to <input_stem>_annotated.json"),
+    input_path: str = typer.Option(..., "--input", "-i", help="Input BioC JSON file OR directory of JSON files"),
+    output_path: Optional[str] = typer.Option(None, "--output", "-o", help="Output JSON path (single-file mode) OR output directory (batch mode). If input is a directory, this is required."),
     best_models: str = typer.Option(..., "--best-models", "-b", help="YAML mapping dataset name -> checkpoint directory (must include 'aggregate' plus per-dataset entries)"),
     batch_size: int = typer.Option(32, "--batch-size", help="Inference batch size per model"),
     device: str = typer.Option("auto", "--device", help="'auto', 'cuda', 'mps', or 'cpu'"),
     provider: str = typer.Option("LCSB", "--provider", help="Provider string written into every emitted relation"),
     single_checkpoint_at_a_time: bool = typer.Option(False, "--single-checkpoint-at-a-time", help="Evict each model before loading the next (lower peak memory, slower)"),
+    pattern: str = typer.Option("*.json", "--pattern", help="[batch mode] Glob pattern used to discover input files"),
+    recursive: bool = typer.Option(True, "--recursive/--no-recursive", help="[batch mode] Walk subdirectories under --input"),
+    force: bool = typer.Option(False, "--force/--no-force", help="[batch mode] Re-annotate files whose output already exists"),
+    continue_on_error: bool = typer.Option(True, "--continue-on-error/--stop-on-error", help="[batch mode] Log per-file failures and keep going, or stop at the first error"),
+    summary_path: Optional[str] = typer.Option(None, "--summary", help="[batch mode] Write the run summary as JSON to this path"),
 ) -> None:
-    """Two-tier relation annotation over a BioC-format JSON.
+    """Two-tier relation annotation over BioC JSON.
 
-    Reads biomedical entities (Disease/Chemical/Gene) from each passage,
-    splits passages into sentences, enumerates valid entity pairs (matching
-    one of the 5 aggregate classes), scores each pair with the aggregate
-    model plus routed per-dataset models, and appends relation entries to
-    every passage's ``relations`` array. PICO annotations are ignored;
-    same-concept mentions within a sentence are merged via UMLS identifier.
+    ``--input`` may be a single JSON file or a directory of JSON files. When
+    a directory is passed, every match under it is annotated (recursively by
+    default) and outputs are written to ``--output`` (also a directory) with
+    the input tree mirrored. Models load ONCE for the whole batch, so
+    processing thousands of files does not re-pay the checkpoint-loading cost.
 
-    The output JSON preserves the input structure byte-for-byte apart from
-    the appended relations. Cross-passage relations are not extracted.
+    For each passage: biomedical entities (Disease/Chemical/Gene) are lifted,
+    sentences split, pairs matching the 5 aggregate classes enumerated,
+    scored with the aggregate model plus routed per-dataset models, and
+    relation entries appended to that passage's ``relations`` array. PICO
+    annotations are ignored; same-concept mentions within a sentence are
+    merged via UMLS identifier. Cross-passage relations are not extracted.
     """
-    from medre_bench.annotation.pipeline import run_annotation
+    from medre_bench.annotation.pipeline import run_annotation, run_annotation_batch
+    import json as _json
 
-    out = run_annotation(
-        input_path=input_path,
-        output_path=output_path,
-        best_models_path=best_models,
-        batch_size=batch_size,
-        device=device,
-        provider=provider,
-        single_checkpoint_at_a_time=single_checkpoint_at_a_time,
-    )
-    typer.echo(f"wrote {out}")
+    in_path = Path(input_path).expanduser().resolve()
+    if in_path.is_dir():
+        if not output_path:
+            raise typer.BadParameter("--output is required when --input is a directory")
+        summary = run_annotation_batch(
+            input_dir=input_path,
+            output_dir=output_path,
+            best_models_path=best_models,
+            batch_size=batch_size,
+            device=device,
+            provider=provider,
+            single_checkpoint_at_a_time=single_checkpoint_at_a_time,
+            pattern=pattern,
+            recursive=recursive,
+            force=force,
+            continue_on_error=continue_on_error,
+        )
+        typer.echo(
+            f"batch done: {summary['processed']} processed, "
+            f"{summary['skipped']} skipped, {summary['failed']} failed "
+            f"(of {summary['total']} discovered); "
+            f"{summary['relations_emitted']} total relations emitted"
+        )
+        if summary_path:
+            Path(summary_path).expanduser().write_text(_json.dumps(summary, indent=2))
+            typer.echo(f"summary written to {summary_path}")
+        if summary["failed"] > 0:
+            raise typer.Exit(code=1)
+    else:
+        out = run_annotation(
+            input_path=input_path,
+            output_path=output_path,
+            best_models_path=best_models,
+            batch_size=batch_size,
+            device=device,
+            provider=provider,
+            single_checkpoint_at_a_time=single_checkpoint_at_a_time,
+        )
+        typer.echo(f"wrote {out}")
 
 
 @app.command(name="evaluate-aggregate")
