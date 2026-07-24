@@ -139,6 +139,42 @@ def predict(
             typer.echo(f"    - {row['label']:<28} {row['prob']:.4f}")
 
 
+@app.command()
+def annotate(
+    input_path: str = typer.Option(..., "--input", "-i", help="Input BioC JSON file to annotate with relations"),
+    output_path: Optional[str] = typer.Option(None, "--output", "-o", help="Output JSON path; defaults to <input_stem>_annotated.json"),
+    best_models: str = typer.Option(..., "--best-models", "-b", help="YAML mapping dataset name -> checkpoint directory (must include 'aggregate' plus per-dataset entries)"),
+    batch_size: int = typer.Option(32, "--batch-size", help="Inference batch size per model"),
+    device: str = typer.Option("auto", "--device", help="'auto', 'cuda', 'mps', or 'cpu'"),
+    provider: str = typer.Option("LCSB", "--provider", help="Provider string written into every emitted relation"),
+    single_checkpoint_at_a_time: bool = typer.Option(False, "--single-checkpoint-at-a-time", help="Evict each model before loading the next (lower peak memory, slower)"),
+) -> None:
+    """Two-tier relation annotation over a BioC-format JSON.
+
+    Reads biomedical entities (Disease/Chemical/Gene) from each passage,
+    splits passages into sentences, enumerates valid entity pairs (matching
+    one of the 5 aggregate classes), scores each pair with the aggregate
+    model plus routed per-dataset models, and appends relation entries to
+    every passage's ``relations`` array. PICO annotations are ignored;
+    same-concept mentions within a sentence are merged via UMLS identifier.
+
+    The output JSON preserves the input structure byte-for-byte apart from
+    the appended relations. Cross-passage relations are not extracted.
+    """
+    from medre_bench.annotation.pipeline import run_annotation
+
+    out = run_annotation(
+        input_path=input_path,
+        output_path=output_path,
+        best_models_path=best_models,
+        batch_size=batch_size,
+        device=device,
+        provider=provider,
+        single_checkpoint_at_a_time=single_checkpoint_at_a_time,
+    )
+    typer.echo(f"wrote {out}")
+
+
 @app.command(name="evaluate-aggregate")
 def evaluate_aggregate(
     checkpoint: str = typer.Option(..., "--checkpoint", help="Path to an aggregate-trained checkpoint directory"),
