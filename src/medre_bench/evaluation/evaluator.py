@@ -103,7 +103,7 @@ def run_evaluation(
     # Determine model architecture from saved config
     import medre_bench.models  # noqa: F401
     from medre_bench.registry import MODEL_REGISTRY
-    from medre_bench.models.base import get_entity_marker_tokens
+    from medre_bench.models.base import align_encoder_vocab_to_state_dict, get_entity_marker_tokens
 
     model_name = saved_config.get("model", {}).get("name", "bert-base") if config_path.exists() else "bert-base"
     model_cls = MODEL_REGISTRY.get(model_name)
@@ -117,6 +117,7 @@ def run_evaluation(
     base_model.tokenizer = tokenizer
 
     model = REModel(base_model, num_labels=num_labels)
+    align_encoder_vocab_to_state_dict(model, model_state)
     model.load_state_dict(model_state, strict=False)
     model.to(device)
     model.eval()

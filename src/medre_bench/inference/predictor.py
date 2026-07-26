@@ -61,7 +61,7 @@ def _load_checkpoint(checkpoint_path: Path, device: torch.device):
 
     import medre_bench.datasets  # noqa: F401 - trigger dataset registration
     import medre_bench.models  # noqa: F401 - trigger model registration
-    from medre_bench.models.base import get_entity_marker_tokens
+    from medre_bench.models.base import align_encoder_vocab_to_state_dict, get_entity_marker_tokens
     from medre_bench.registry import DATASET_REGISTRY, MODEL_REGISTRY
     from medre_bench.training.trainer import REModel
 
@@ -128,6 +128,7 @@ def _load_checkpoint(checkpoint_path: Path, device: torch.device):
             f"No model weights in {checkpoint_path}: expected model.safetensors "
             "or pytorch_model.bin."
         )
+    align_encoder_vocab_to_state_dict(model, state)
     model.load_state_dict(state, strict=False)
     model.to(device)
     model.eval()

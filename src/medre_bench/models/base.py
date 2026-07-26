@@ -88,3 +88,39 @@ def get_entity_marker_tokens(strategy: str) -> list[str]:
         return ["[E1]", "[/E1]", "[E2]", "[/E2]"]
     else:
         raise ValueError(f"Unknown entity marker strategy: {strategy}")
+
+
+def align_encoder_vocab_to_state_dict(model: "nn.Module", state_dict: dict) -> None:
+    """Resize the wrapped encoder's token embeddings to match the checkpoint's
+    vocab size before ``load_state_dict``.
+
+    Loading fails with a size-mismatch error when the pretrained model on HF Hub
+    has a different vocab size than what was used during training - either the
+    training run added tokens the reconstruction doesn't know about, or HF Hub
+    swapped the tokenizer since training. Rather than hard-coding the delta per
+    model, we detect the checkpoint's vocab from its word_embeddings tensor and
+    resize the encoder via ``resize_token_embeddings``.
+
+    Safe to call even when sizes already match (it's a no-op then). Works
+    across BERT, RoBERTa, DistilBERT, GPT-2 and BigBird encoders by scanning
+    for the standard token-embedding key names.
+    """
+    encoder = getattr(getattr(model, "base_model", None), "encoder", None)
+    if encoder is None:
+        return
+    try:
+        curr_size = encoder.get_input_embeddings().weight.shape[0]
+    except AttributeError:
+        return
+
+    embed_suffixes = (
+        "word_embeddings.weight",  # BERT / RoBERTa / DistilBERT
+        "wte.weight",              # GPT-2
+        "embed_tokens.weight",     # BigBird / some seq2seq
+    )
+    for key, tensor in state_dict.items():
+        if key.endswith(embed_suffixes):
+            ckpt_size = tensor.shape[0]
+            if ckpt_size != curr_size:
+                encoder.resize_token_embeddings(ckpt_size)
+            return

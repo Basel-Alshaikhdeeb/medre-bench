@@ -91,7 +91,7 @@ def run_aggregate_evaluation(
 
     from medre_bench.datasets.aggregate import AggregateDataset
     from medre_bench.datasets.base import apply_entity_markers
-    from medre_bench.models.base import get_entity_marker_tokens
+    from medre_bench.models.base import align_encoder_vocab_to_state_dict, get_entity_marker_tokens
     from medre_bench.registry import MODEL_REGISTRY
     from medre_bench.training.trainer import REModel, RETokenizedDataset
 
@@ -160,6 +160,7 @@ def run_aggregate_evaluation(
         state = torch.load(pytorch_path, map_location=device, weights_only=True)
     else:
         raise FileNotFoundError(f"No weights in {ckpt}")
+    align_encoder_vocab_to_state_dict(model, state)
     model.load_state_dict(state, strict=False)
     model.to(device)
     model.eval()

@@ -115,7 +115,7 @@ class ModelPool:
 
         import medre_bench.datasets  # noqa: F401 - registration side-effects
         import medre_bench.models  # noqa: F401
-        from medre_bench.models.base import get_entity_marker_tokens
+        from medre_bench.models.base import align_encoder_vocab_to_state_dict, get_entity_marker_tokens
         from medre_bench.registry import DATASET_REGISTRY, MODEL_REGISTRY
         from medre_bench.training.trainer import REModel
 
@@ -192,6 +192,7 @@ class ModelPool:
             state = torch.load(pb, map_location=self._device, weights_only=True)
         else:
             raise FileNotFoundError(f"No model weights in {ckpt_dir}")
+        align_encoder_vocab_to_state_dict(model, state)
         model.load_state_dict(state, strict=False)
         model.to(self._device).eval()
 
