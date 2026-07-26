@@ -133,9 +133,9 @@ def run_evaluation(
         eval_dataset, batch_size=batch_size, shuffle=False, collate_fn=data_collator
     )
 
-    # Run inference
-    all_preds = []
-    all_labels = []
+    # Run inference — keep the full logits so compute_metrics can compute ROC-AUC
+    all_logits: list[np.ndarray] = []
+    all_labels: list[int] = []
 
     with torch.no_grad():
         for batch in tqdm(dataloader, desc="Evaluating"):
@@ -144,27 +144,21 @@ def run_evaluation(
             labels = batch["labels"]
 
             outputs = model(input_ids=input_ids, attention_mask=attention_mask)
-            preds = torch.argmax(outputs.logits, dim=-1).cpu().numpy()
+            all_logits.append(outputs.logits.detach().cpu().float().numpy())
+            all_labels.extend(labels.numpy().tolist())
 
-            all_preds.extend(preds)
-            all_labels.extend(labels.numpy())
+    all_logits_arr = np.concatenate(all_logits, axis=0)
+    all_labels_arr = np.array(all_labels)
+    all_preds = np.argmax(all_logits_arr, axis=-1)
 
-    all_preds = np.array(all_preds)
-    all_labels = np.array(all_labels)
-
-    # Compute metrics
+    # compute_metrics unpacks (predictions, labels); pass logits so it can
+    # softmax internally and report ROC-AUC alongside F1.
     from medre_bench.training.metrics import compute_metrics as _compute
 
-    class _EvalPred:
-        def __init__(self, predictions, label_ids):
-            self.predictions = predictions
-            self.label_ids = label_ids
-
-    eval_pred = _EvalPred(all_preds, all_labels)
-    metrics = _compute(eval_pred)
+    metrics = _compute((all_logits_arr, all_labels_arr))
 
     # Per-class metrics
-    per_class = compute_per_class_metrics(all_labels, all_preds, label_names)
+    per_class = compute_per_class_metrics(all_labels_arr, all_preds, label_names)
     metrics["per_class"] = per_class["per_class"]
 
     logger.info(f"Results on {dataset_name}/{split}:")
@@ -184,8 +178,8 @@ def run_evaluation(
                 "entity1": ex.entity1,
                 "entity2": ex.entity2,
                 "true_label": ex.label,
-                "predicted_label": dataset.label_names()[all_preds[i]],
-                "correct": bool(all_preds[i] == all_labels[i]),
+                "predicted_label": label_names[int(all_preds[i])],
+                "correct": bool(all_preds[i] == all_labels_arr[i]),
             })
 
         with open(out_path / f"predictions_{dataset_name}_{split}.json", "w") as f:
