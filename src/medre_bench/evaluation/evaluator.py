@@ -45,20 +45,39 @@ def run_evaluation(
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     checkpoint = Path(checkpoint_path)
 
-    # Load config snapshot to determine model settings
-    config_path = checkpoint.parent.parent.parent / "config_snapshot.yaml"
+    # Load config snapshot to recover model architecture, marker strategy, etc.
+    # config_snapshot.yaml lives in the timestamp dir - two levels above best/ -
+    # not three. Search a few candidate locations to be robust to checkpoint
+    # paths passed at different depths (matches the pattern used by
+    # predictor.py, aggregate_eval.py, and annotation/model_pool.py).
+    import yaml
+
     entity_marker_strategy = "typed_entity_marker_punct"
     max_seq_length = 512
+    saved_config: dict = {}
 
-    if config_path.exists():
-        import yaml
-
-        with open(config_path) as f:
-            saved_config = yaml.safe_load(f)
-        entity_marker_strategy = saved_config.get("model", {}).get(
-            "entity_marker_strategy", entity_marker_strategy
+    for candidate in (
+        checkpoint / "config_snapshot.yaml",
+        checkpoint.parent / "config_snapshot.yaml",
+        checkpoint.parent.parent / "config_snapshot.yaml",
+        checkpoint.parent.parent.parent / "config_snapshot.yaml",
+    ):
+        if candidate.exists():
+            with open(candidate) as f:
+                saved_config = yaml.safe_load(f) or {}
+            entity_marker_strategy = saved_config.get("model", {}).get(
+                "entity_marker_strategy", entity_marker_strategy
+            )
+            max_seq_length = saved_config.get("model", {}).get(
+                "max_seq_length", max_seq_length
+            )
+            logger.info(f"loaded config snapshot from {candidate}")
+            break
+    else:
+        logger.warning(
+            f"no config_snapshot.yaml found near {checkpoint}; "
+            "falling back to bert-base + typed_entity_marker_punct + max_seq_length=512"
         )
-        max_seq_length = saved_config.get("model", {}).get("max_seq_length", max_seq_length)
 
     # Load dataset
     dataset_cls = DATASET_REGISTRY.get(dataset_name)
@@ -67,7 +86,7 @@ def run_evaluation(
     logger.info(f"Loaded {len(examples)} examples from {dataset_name}/{split}")
 
     # Mirror the trainer's binary collapse so labels match the checkpoint's head
-    binary_mode = bool(saved_config.get("dataset", {}).get("binary_mode", False)) if config_path.exists() else False
+    binary_mode = bool(saved_config.get("dataset", {}).get("binary_mode", False))
     if binary_mode:
         from medre_bench.datasets.preprocessing import BINARY_LABEL_NAMES, collapse_to_binary
 
@@ -105,7 +124,7 @@ def run_evaluation(
     from medre_bench.registry import MODEL_REGISTRY
     from medre_bench.models.base import align_encoder_vocab_to_state_dict, get_entity_marker_tokens
 
-    model_name = saved_config.get("model", {}).get("name", "bert-base") if config_path.exists() else "bert-base"
+    model_name = saved_config.get("model", {}).get("name", "bert-base")
     model_cls = MODEL_REGISTRY.get(model_name)
     base_model = model_cls()
 
