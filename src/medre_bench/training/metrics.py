@@ -69,6 +69,67 @@ def compute_metrics(eval_pred: Any) -> dict[str, float]:
     return metrics
 
 
+def make_per_source_compute_metrics(source_ids: list[str]):
+    """Build a ``compute_metrics`` closure that slices predictions per source.
+
+    Used by :func:`run_training` when the eval dataset carries per-example
+    ``source_of_origin`` metadata (currently: the ``aggregate_binary`` dataset).
+    Returns the standard aggregate metrics plus:
+
+    * one ``{src}_micro_f1`` / ``{src}_macro_f1`` / ``{src}_f1_positive`` /
+      ``{src}_precision_positive`` / ``{src}_recall_positive`` / ``{src}_n``
+      block per source.
+    * ``across_source_avg_f1`` — the mean of per-source ``f1_positive`` values;
+      recommended as ``metric_for_best_model``.
+
+    ``source_ids`` must be aligned index-for-index with the eval dataset the
+    Trainer sees; the caller is responsible for keeping that alignment (which
+    is the default because Trainer's eval dataloader uses ``shuffle=False``).
+    """
+    unique_sources = sorted(set(source_ids))
+    ids = np.asarray(source_ids)
+
+    def _compute(eval_pred) -> dict[str, float]:
+        base = compute_metrics(eval_pred)
+
+        predictions, labels = eval_pred
+        if predictions.ndim > 1:
+            preds = np.argmax(predictions, axis=-1)
+        else:
+            preds = predictions
+        labels = np.asarray(labels)
+
+        per_source_f1_pos: list[float] = []
+        for src in unique_sources:
+            mask = ids == src
+            n = int(mask.sum())
+            if n == 0:
+                continue
+            src_labels = labels[mask]
+            src_preds = preds[mask]
+
+            micro = float(f1_score(src_labels, src_preds, average="micro", zero_division=0))
+            macro = float(f1_score(src_labels, src_preds, average="macro", zero_division=0))
+            f1_pos = float(f1_score(src_labels, src_preds, pos_label=1, zero_division=0))
+            prec_pos = float(precision_score(src_labels, src_preds, pos_label=1, zero_division=0))
+            rec_pos = float(recall_score(src_labels, src_preds, pos_label=1, zero_division=0))
+
+            base[f"{src}_micro_f1"] = micro
+            base[f"{src}_macro_f1"] = macro
+            base[f"{src}_f1_positive"] = f1_pos
+            base[f"{src}_precision_positive"] = prec_pos
+            base[f"{src}_recall_positive"] = rec_pos
+            base[f"{src}_n"] = n
+            per_source_f1_pos.append(f1_pos)
+
+        base["across_source_avg_f1"] = (
+            float(np.mean(per_source_f1_pos)) if per_source_f1_pos else 0.0
+        )
+        return base
+
+    return _compute
+
+
 def compute_per_class_metrics(
     labels: np.ndarray,
     predictions: np.ndarray,

@@ -26,7 +26,7 @@ from medre_bench.datasets.preprocessing import (
 from medre_bench.models.base import BaseREModel, get_entity_marker_tokens
 from medre_bench.registry import DATASET_REGISTRY, MODEL_REGISTRY
 from medre_bench.training.callbacks import ConfigSnapshotCallback, WandbExtrasCallback
-from medre_bench.training.metrics import compute_metrics
+from medre_bench.training.metrics import compute_metrics, make_per_source_compute_metrics
 from medre_bench.utils.io import create_run_dir, save_metrics
 from medre_bench.utils.logging import setup_logger
 from medre_bench.utils.seed import seed_everything
@@ -273,6 +273,28 @@ def run_training(cfg: ExperimentConfig) -> dict[str, Any]:
         cfg.model.entity_marker_strategy,
     )
 
+    # If the eval dataset carries per-example ``source_of_origin`` metadata
+    # (currently: the aggregate_binary dataset), switch to a compute_metrics
+    # closure that reports per-source F1(+) + an across_source_avg_f1
+    # scalar, and use the average for best-checkpoint selection.
+    eval_source_ids = [
+        ex.metadata.get("source_of_origin") for ex in eval_examples
+    ]
+    per_source_eval = any(sid for sid in eval_source_ids)
+    if per_source_eval:
+        # Ordinal alignment with the eval dataset is preserved because HF
+        # Trainer's eval dataloader uses shuffle=False by default.
+        compute_metrics_fn = make_per_source_compute_metrics(eval_source_ids)
+        metric_for_best = "across_source_avg_f1"
+        logger.info(
+            f"per-source eval enabled; sources: "
+            f"{sorted({sid for sid in eval_source_ids if sid})}; "
+            f"metric_for_best_model = {metric_for_best!r}"
+        )
+    else:
+        compute_metrics_fn = compute_metrics
+        metric_for_best = cfg.training.metric_for_best_model
+
     # Configure reporting
     report_to = []
     if cfg.logging.use_tensorboard:
@@ -300,7 +322,7 @@ def run_training(cfg: ExperimentConfig) -> dict[str, Any]:
         save_strategy=cfg.logging.save_strategy if save_ckpt else "no",
         save_total_limit=cfg.logging.save_total_limit if save_ckpt else 0,
         load_best_model_at_end=save_ckpt,
-        metric_for_best_model=cfg.training.metric_for_best_model if save_ckpt else None,
+        metric_for_best_model=metric_for_best if save_ckpt else None,
         greater_is_better=True if save_ckpt else None,
         logging_steps=cfg.logging.log_every_n_steps,
         logging_dir=str(run_dir / "tensorboard"),
@@ -336,7 +358,7 @@ def run_training(cfg: ExperimentConfig) -> dict[str, Any]:
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         data_collator=data_collator,
-        compute_metrics=compute_metrics,
+        compute_metrics=compute_metrics_fn,
         callbacks=callbacks,
     )
 
