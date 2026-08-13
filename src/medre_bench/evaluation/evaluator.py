@@ -122,7 +122,33 @@ def run_evaluation(
     # Determine model architecture from saved config
     import medre_bench.models  # noqa: F401
     from medre_bench.registry import MODEL_REGISTRY
-    from medre_bench.models.base import align_encoder_vocab_to_state_dict, get_entity_marker_tokens
+    from medre_bench.models.base import align_encoder_vocab_to_state_dict, get_entity_marker_tokens, peek_classifier_num_labels
+
+    # Head-size sanity check: does the CLI --dataset imply the same num_labels
+    # as the checkpoint's classifier? Common mistake: pass --dataset aggregate
+    # to a checkpoint trained with aggregate_binary (or vice versa) — the fresh
+    # model builds a 6-head classifier and load_state_dict later fails cryptically.
+    ckpt_num_labels = peek_classifier_num_labels(model_state)
+    if ckpt_num_labels is not None and ckpt_num_labels != num_labels:
+        ckpt_dataset = saved_config.get("dataset", {}).get("name") or "unknown"
+        logger.warning(
+            f"num_labels mismatch: checkpoint has {ckpt_num_labels} outputs "
+            f"(dataset in config_snapshot: {ckpt_dataset!r}), but --dataset "
+            f"{dataset_name!r} implies {num_labels}. Building the model to match "
+            f"the checkpoint ({ckpt_num_labels} outputs); labels beyond that are dropped."
+        )
+        # Use the checkpoint's head size so load_state_dict succeeds. This still
+        # runs inference over the CLI-specified eval data — if the labels there
+        # don't fit in the smaller space, that's a separate problem the caller
+        # should notice from the per-class metrics.
+        num_labels = ckpt_num_labels
+        # If the checkpoint is binary, force the local label_names to binary too
+        # so downstream reporting is coherent.
+        if num_labels == 2:
+            from medre_bench.datasets.preprocessing import BINARY_LABEL_NAMES, collapse_to_binary
+            examples = collapse_to_binary(examples)
+            label_names = list(BINARY_LABEL_NAMES)
+            binary_mode = True
 
     model_name = saved_config.get("model", {}).get("name", "bert-base")
     model_cls = MODEL_REGISTRY.get(model_name)

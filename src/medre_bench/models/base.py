@@ -90,6 +90,19 @@ def get_entity_marker_tokens(strategy: str) -> list[str]:
         raise ValueError(f"Unknown entity marker strategy: {strategy}")
 
 
+def peek_classifier_num_labels(state_dict: dict) -> int | None:
+    """Return the number of output labels the checkpoint's classifier expects,
+    or ``None`` if we can't find the standard key. Lets callers detect a mismatch
+    between the CLI ``--dataset`` argument (which determines the fresh model's
+    head size) and what the checkpoint actually was trained with, before
+    ``load_state_dict`` blows up with a size-mismatch error.
+    """
+    for key in ("base_model.classifier.weight", "classifier.weight"):
+        if key in state_dict:
+            return int(state_dict[key].shape[0])
+    return None
+
+
 def align_encoder_vocab_to_state_dict(model: "nn.Module", state_dict: dict) -> None:
     """Resize the wrapped encoder's token embeddings to match the checkpoint's
     vocab size before ``load_state_dict``.

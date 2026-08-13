@@ -91,7 +91,7 @@ def run_aggregate_evaluation(
 
     from medre_bench.datasets.aggregate import AggregateDataset
     from medre_bench.datasets.base import apply_entity_markers
-    from medre_bench.models.base import align_encoder_vocab_to_state_dict, get_entity_marker_tokens
+    from medre_bench.models.base import align_encoder_vocab_to_state_dict, get_entity_marker_tokens, peek_classifier_num_labels
     from medre_bench.registry import MODEL_REGISTRY
     from medre_bench.training.trainer import REModel, RETokenizedDataset
 
@@ -132,14 +132,39 @@ def run_aggregate_evaluation(
     max_seq_length = int(saved_config.get("model", {}).get("max_seq_length", 512))
     model_name = saved_config.get("model", {}).get("name", "bert-base")
 
-    # Aggregate always has 6 output classes.
-    agg = AggregateDataset()
-    num_labels = agg.num_labels()
-
     device = torch.device(
         "cuda" if torch.cuda.is_available()
         else ("mps" if torch.backends.mps.is_available() else "cpu")
     )
+
+    # Load state BEFORE building the model so we can peek at the checkpoint's
+    # classifier size. This lets evaluate-aggregate work on either a 6-class
+    # AggregateDataset checkpoint or a 2-class AggregateBinaryDataset one
+    # without the caller having to tell us which.
+    safetensors_path = ckpt / "model.safetensors"
+    pytorch_path = ckpt / "pytorch_model.bin"
+    if safetensors_path.exists():
+        from safetensors.torch import load_file
+        state = load_file(str(safetensors_path), device=str(device))
+    elif pytorch_path.exists():
+        state = torch.load(pytorch_path, map_location=device, weights_only=True)
+    else:
+        raise FileNotFoundError(f"No weights in {ckpt}")
+
+    peeked_num_labels = peek_classifier_num_labels(state)
+    if peeked_num_labels is None:
+        # Fall back to the 5-class AggregateDataset default.
+        num_labels = AggregateDataset().num_labels()
+        logger.warning(
+            "could not peek classifier size from checkpoint; defaulting to 6 output classes"
+        )
+    else:
+        num_labels = peeked_num_labels
+        variant = "binary" if num_labels == 2 else "6-class"
+        logger.info(
+            f"checkpoint has {num_labels} output classes ({variant} aggregate model)"
+        )
+
     tokenizer = AutoTokenizer.from_pretrained(str(ckpt))
     model_cls = MODEL_REGISTRY.get(model_name)
     base_model = model_cls()
@@ -150,16 +175,6 @@ def run_aggregate_evaluation(
     )
     base_model.tokenizer = tokenizer
     model = REModel(base_model, num_labels=num_labels)
-
-    safetensors_path = ckpt / "model.safetensors"
-    pytorch_path = ckpt / "pytorch_model.bin"
-    if safetensors_path.exists():
-        from safetensors.torch import load_file
-        state = load_file(str(safetensors_path), device=str(device))
-    elif pytorch_path.exists():
-        state = torch.load(pytorch_path, map_location=device, weights_only=True)
-    else:
-        raise FileNotFoundError(f"No weights in {ckpt}")
     align_encoder_vocab_to_state_dict(model, state)
     model.load_state_dict(state, strict=False)
     model.to(device)
