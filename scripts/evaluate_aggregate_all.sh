@@ -22,20 +22,23 @@ SPLIT="${SPLIT:-test}"
 BATCH_SIZE="${BATCH_SIZE:-64}"
 SOURCES="${SOURCES:-}"
 FORCE="${FORCE:-}"
+# Which aggregate variant's checkpoints to score. 'aggregate' = 5-class,
+# 'aggregate_binary' = the new binary corpus.
+DATASET_TAG="${DATASET_TAG:-aggregate}"
 
 if ! command -v medre-bench >/dev/null 2>&1; then
   echo "medre-bench CLI not on PATH — source your venv first" >&2
   exit 1
 fi
 
-echo "[eval] outputs_dir=$OUTPUTS_DIR split=$SPLIT batch_size=$BATCH_SIZE"
+echo "[eval] outputs_dir=$OUTPUTS_DIR split=$SPLIT batch_size=$BATCH_SIZE dataset_tag=$DATASET_TAG"
 
 n_ckpts=0
 n_ran_agg=0
 n_ran_per_src=0
 n_skipped=0
 
-for run_dir in "$OUTPUTS_DIR"/*__aggregate__seed*/; do
+for run_dir in "$OUTPUTS_DIR"/*__"${DATASET_TAG}"__seed*/; do
   [ -d "$run_dir" ] || continue
 
   # Newest timestamped subdir (in case there were multiple training attempts).
@@ -54,14 +57,14 @@ for run_dir in "$OUTPUTS_DIR"/*__aggregate__seed*/; do
 
   # ---- 1) Aggregate/test: 6-class multiclass ---------------------------------
   agg_out="$ts_dir/aggregate_test_eval"
-  agg_json="$agg_out/metrics_aggregate_${SPLIT}.json"
+  agg_json="$agg_out/metrics_${DATASET_TAG}_${SPLIT}.json"
   if [ -z "$FORCE" ] && [ -f "$agg_json" ]; then
     echo "  skip evaluate: $agg_json exists"
     n_skipped=$((n_skipped + 1))
   else
     medre-bench evaluate \
       --checkpoint "$ckpt" \
-      --dataset aggregate \
+      --dataset "$DATASET_TAG" \
       --split "$SPLIT" \
       --output-dir "$agg_out"
     n_ran_agg=$((n_ran_agg + 1))

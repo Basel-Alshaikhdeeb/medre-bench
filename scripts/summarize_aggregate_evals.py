@@ -69,7 +69,11 @@ def _fmt(mean: float, std: float, precision: int = 4) -> str:
     return f"{mean:.{precision}f} ± {std:.{precision}f}"
 
 
-def _collect(outputs_dir: Path, split: str) -> tuple[
+def _collect(
+    outputs_dir: Path,
+    split: str,
+    dataset_tag: str = "aggregate",
+) -> tuple[
     dict[str, list[dict]],           # aggregate/<split>: model -> [eval_metrics per seed]
     dict[str, dict[str, list[dict]]], # per-source: model -> source -> [metrics per seed]
 ]:
@@ -80,7 +84,9 @@ def _collect(outputs_dir: Path, split: str) -> tuple[
         if not run_dir.is_dir():
             continue
         parts = run_dir.name.split("__")
-        if len(parts) < 3 or parts[1] != "aggregate":
+        # Match "<model>__<dataset_tag>__seed<N>" exactly on the dataset segment
+        # (parts[1]). Handles aggregate vs aggregate_binary cleanly.
+        if len(parts) < 3 or parts[1] != dataset_tag:
             continue
         model = parts[0]
 
@@ -88,7 +94,7 @@ def _collect(outputs_dir: Path, split: str) -> tuple[
             if not ts_dir.is_dir():
                 continue
 
-            agg_json = ts_dir / "aggregate_test_eval" / f"metrics_aggregate_{split}.json"
+            agg_json = ts_dir / "aggregate_test_eval" / f"metrics_{dataset_tag}_{split}.json"
             if agg_json.exists():
                 try:
                     payload = json.loads(agg_json.read_text())
@@ -237,6 +243,12 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--outputs-dir", default="outputs")
     p.add_argument("--split", default="test", help="which split's JSONs to summarize (default: test)")
+    p.add_argument(
+        "--dataset-tag",
+        default="aggregate",
+        help="Which aggregate variant's runs to summarize: 'aggregate' (5-class) or "
+             "'aggregate_binary' (default: aggregate). Matches parts[1] of the run dir name.",
+    )
     p.add_argument("--output-file", default=None)
     p.add_argument("--format", choices=["table", "csv", "markdown"], default="table")
     p.add_argument("--baselines-dir", default=None,
@@ -246,11 +258,18 @@ def main() -> int:
     args = p.parse_args()
 
     outputs_dir = Path(args.outputs_dir).expanduser().resolve()
-    aggregate_test, per_source = _collect(outputs_dir, args.split)
+    aggregate_test, per_source = _collect(outputs_dir, args.split, args.dataset_tag)
 
     if not aggregate_test and not per_source:
-        print(f"no aggregate evaluation results found under {outputs_dir}", file=sys.stderr)
-        print(f"did you run scripts/evaluate_aggregate_all.sh with SPLIT={args.split}?", file=sys.stderr)
+        print(
+            f"no results found for dataset_tag={args.dataset_tag!r} under {outputs_dir}",
+            file=sys.stderr,
+        )
+        print(
+            f"did you run evaluate_aggregate_all.sh with DATASET_TAG={args.dataset_tag} "
+            f"and SPLIT={args.split}?",
+            file=sys.stderr,
+        )
         return 2
 
     agg_rows = _render_aggregate_table(aggregate_test)
@@ -262,7 +281,8 @@ def main() -> int:
 
     parts: list[str] = []
 
-    parts.append(f"=== Aggregate/{args.split} — 6-class multiclass (mean ± std across seeds) ===\n")
+    variant_label = "binary" if args.dataset_tag == "aggregate_binary" else "6-class multiclass"
+    parts.append(f"=== {args.dataset_tag}/{args.split} — {variant_label} (mean ± std across seeds) ===\n")
     agg_cols = [
         ("model", "model"), ("n_seeds", "n_seeds"),
         ("micro_f1", "micro_f1"), ("macro_f1", "macro_f1"),

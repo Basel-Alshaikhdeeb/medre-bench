@@ -56,6 +56,9 @@ nvidia-smi || true
 OUTPUTS_DIR="${OUTPUTS_DIR:-outputs}"
 SPLIT="${SPLIT:-test}"
 BATCH_SIZE="${BATCH_SIZE:-64}"
+# Which aggregate variant's checkpoints to score: 'aggregate' (5-class) or
+# 'aggregate_binary' (new binary corpus). Overrideable via --export.
+DATASET_TAG="${DATASET_TAG:-aggregate}"
 
 NSHARDS=${SLURM_ARRAY_TASK_COUNT}
 SHARD=${SLURM_ARRAY_TASK_ID}
@@ -66,7 +69,7 @@ mkdir -p "$TMP_ROOT"
 # --- Discover + shard the checkpoint list ------------------------------------
 # Every dir shaped outputs/<model>__aggregate__seed<N>/ is one unit of work.
 SHARD_LIST="$TMP_ROOT/shard_${SLURM_ARRAY_JOB_ID}_${SHARD}.txt"
-find "$OUTPUTS_DIR" -maxdepth 1 -mindepth 1 -type d -name '*__aggregate__seed*' \
+find "$OUTPUTS_DIR" -maxdepth 1 -mindepth 1 -type d -name "*__${DATASET_TAG}__seed*" \
   | sort | awk "NR % $NSHARDS == $SHARD" > "$SHARD_LIST"
 
 n_ckpts=$(wc -l < "$SHARD_LIST" | tr -d ' ')
@@ -107,14 +110,14 @@ while IFS= read -r run_dir; do
 
   # 1) Aggregate/test (6-class multiclass on aggregate corpus test split)
   agg_out="$ts_dir/aggregate_test_eval"
-  agg_json="$agg_out/metrics_aggregate_${SPLIT}.json"
+  agg_json="$agg_out/metrics_${DATASET_TAG}_${SPLIT}.json"
   if [ -z "${FORCE:-}" ] && [ -f "$agg_json" ]; then
     echo "  skip evaluate: $agg_json exists"
     n_skipped=$((n_skipped + 1))
   else
     medre-bench evaluate \
       --checkpoint "$ckpt" \
-      --dataset aggregate \
+      --dataset "$DATASET_TAG" \
       --split "$SPLIT" \
       --output-dir "$agg_out"
     n_ran_agg=$((n_ran_agg + 1))
