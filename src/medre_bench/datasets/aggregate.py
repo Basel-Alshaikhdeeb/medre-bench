@@ -56,8 +56,9 @@ _ENTITY_TYPE_MAP: dict[str, str] = {
     "SequenceVariant": "GENE",                 # BioRED (variants folded into GENE)
     "Genes & Molecular Sequences": "GENE",     # EuADR
     "SNP & Sequence variations": "GENE",       # EuADR (variants folded into GENE)
-    "GENE-Y": "GENE",                          # ChemProt, DrugProt
-    "GENE-N": "GENE",                          # ChemProt, DrugProt
+    "GENE-Y": "GENE",                          # ChemProt (raw)
+    "GENE-N": "GENE",                          # ChemProt (raw)
+    "GENE": "GENE",                            # DrugProt (BigBio normalizes GENE-Y/GENE-N -> GENE)
     "Gene": "GENE",                            # GAD, chem_dis_gene
 }
 

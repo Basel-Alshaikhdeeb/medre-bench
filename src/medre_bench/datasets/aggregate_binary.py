@@ -61,8 +61,9 @@ _ENTITY_TYPE_MAP: dict[str, str] = {
     # GENE (variants live in VARIANT below, not here)
     "GeneOrGeneProduct": "GENE",               # BioRED
     "Genes & Molecular Sequences": "GENE",     # EuADR
-    "GENE-Y": "GENE",                          # ChemProt, DrugProt
-    "GENE-N": "GENE",                          # ChemProt, DrugProt
+    "GENE-Y": "GENE",                          # ChemProt (raw)
+    "GENE-N": "GENE",                          # ChemProt (raw)
+    "GENE": "GENE",                            # DrugProt (BigBio normalizes GENE-Y/GENE-N -> GENE)
     "Gene": "GENE",                            # chem_dis_gene, GAD
     # VARIANT — new canonical type
     "SequenceVariant": "VARIANT",              # BioRED
