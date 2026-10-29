@@ -1,22 +1,31 @@
 #!/usr/bin/env python3
 """Collapse every ``aggregate_eval_<split>.json`` under an outputs tree into
-one ``model x dataset`` pandas table (mean across seeds).
+a pandas view.
+
+Two views:
+
+* ``--view pivot`` (default) — ``model x dataset`` table with the requested
+  metric averaged across seeds. One value per cell.
+* ``--view raw`` — long-format table with one row per ``(model, dataset, seed)``
+  triple and one column per requested metric. Nothing is aggregated.
 
 Discovery walks ``<OUTPUTS_DIR>/*__<DATASET_TAG>__seed*/<ts>/aggregate_eval/aggregate_eval_<split>.json``
-where DATASET_TAG defaults to ``aggregate_binary``. For each (model, source)
-pair the script averages the requested metric across all seeds that scored
-successfully.
+where DATASET_TAG defaults to ``aggregate_binary``.
 
-Example::
+Examples::
 
-    # Mean F1(+) across seeds, one row per model, one column per source
+    # Mean F1(+) across seeds, model x dataset pivot (default)
     python scripts/aggregate_eval_to_dataframe.py
 
-    # Different metric + CSV output
-    python scripts/aggregate_eval_to_dataframe.py \\
-        --metric micro_f1 --output-file agg_micro_f1.csv
+    # Raw view: one row per (model, dataset, seed) with micro_f1, macro_f1, accuracy
+    python scripts/aggregate_eval_to_dataframe.py --view raw
 
-    # Both mean and std side-by-side
+    # Raw view with custom columns, written to CSV
+    python scripts/aggregate_eval_to_dataframe.py --view raw \\
+        --metrics f1_positive,precision_positive,recall_positive \\
+        --output-file raw_pos_metrics.csv
+
+    # Both mean and std side-by-side (pivot only)
     python scripts/aggregate_eval_to_dataframe.py --include-std
 """
 
@@ -106,6 +115,37 @@ def collect(
     return mean_df, std_df, n_df
 
 
+def collect_raw(
+    outputs_dir: Path,
+    dataset_tag: str,
+    split: str,
+    metrics: list[str],
+) -> pd.DataFrame:
+    """Return a long-format DataFrame with one row per (model, dataset, seed).
+
+    Columns are ``["model", "dataset", "seed"] + metrics``. Nothing is
+    averaged — every JSON contributes as many rows as it has sources under
+    ``per_source``. Missing metric values become ``NaN``.
+    """
+    rows: list[dict] = []
+    for model, seed, payload in _iter_run_jsons(outputs_dir, dataset_tag, split):
+        per_source = payload.get("per_source") or {}
+        for source, m in per_source.items():
+            row: dict = {"model": model, "dataset": source, "seed": seed}
+            for metric in metrics:
+                v = m.get(metric)
+                row[metric] = float(v) if v is not None else np.nan
+            rows.append(row)
+
+    if not rows:
+        return pd.DataFrame(columns=["model", "dataset", "seed"] + metrics)
+
+    df = pd.DataFrame(rows, columns=["model", "dataset", "seed"] + metrics)
+    # Deterministic ordering that reads well for humans
+    df = df.sort_values(["model", "dataset", "seed"]).reset_index(drop=True)
+    return df
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--outputs-dir", default="outputs",
@@ -113,10 +153,16 @@ def main() -> int:
     p.add_argument("--dataset-tag", default="aggregate_binary",
                    help="Aggregate variant to summarize: aggregate | aggregate_binary (default: aggregate_binary)")
     p.add_argument("--split", default="test", help="Which JSON split to pull (default: test)")
+    p.add_argument("--view", choices=["pivot", "raw"], default="pivot",
+                   help="'pivot' (default): model x dataset table averaged across seeds. "
+                        "'raw': one row per (model, dataset, seed) with one column per metric.")
     p.add_argument("--metric", default="f1_positive", choices=_AVAILABLE_METRICS,
-                   help="Which per-source metric to place in the cells (default: f1_positive)")
+                   help="[pivot mode] Which per-source metric to place in the cells (default: f1_positive)")
+    p.add_argument("--metrics", default="micro_f1,macro_f1,accuracy",
+                   help="[raw mode] Comma-separated list of metric columns to include "
+                        "(default: micro_f1,macro_f1,accuracy)")
     p.add_argument("--include-std", action="store_true",
-                   help="Also emit a std table (as '<metric>_std') and n_seeds; formats as mean ± std when writing")
+                   help="[pivot mode] Also emit a std table and n_seeds; formats as mean ± std when writing")
     p.add_argument("--output-file", default=None,
                    help="Write to CSV / Markdown / JSON here; extension chooses the format. If omitted, prints the mean table to stdout.")
     p.add_argument("--precision", type=int, default=4, help="Decimal precision for formatting")
@@ -127,6 +173,69 @@ def main() -> int:
         print(f"error: {outputs_dir} is not a directory", file=sys.stderr)
         return 2
 
+    # ── Raw view: one row per (model, dataset, seed), no aggregation ────────
+    if args.view == "raw":
+        metric_list = [m.strip() for m in args.metrics.split(",") if m.strip()]
+        unknown = [m for m in metric_list if m not in _AVAILABLE_METRICS]
+        if unknown:
+            print(
+                f"error: unknown metric(s) in --metrics: {unknown}. "
+                f"Choose from {_AVAILABLE_METRICS}",
+                file=sys.stderr,
+            )
+            return 2
+
+        raw_df = collect_raw(
+            outputs_dir=outputs_dir,
+            dataset_tag=args.dataset_tag,
+            split=args.split,
+            metrics=metric_list,
+        )
+        if raw_df.empty:
+            print(
+                f"no aggregate_eval_{args.split}.json files found under {outputs_dir} "
+                f"for dataset_tag={args.dataset_tag!r}",
+                file=sys.stderr,
+            )
+            return 2
+
+        # Round metric columns for display; leave (model, dataset, seed) untouched
+        display_df = raw_df.copy()
+        for m in metric_list:
+            display_df[m] = display_df[m].round(args.precision)
+
+        out = args.output_file
+        if out is None:
+            try:
+                print(display_df.to_string(index=False))
+            except Exception:
+                print(display_df)
+            return 0
+
+        out_path = Path(out).expanduser().resolve()
+        ext = out_path.suffix.lower()
+        if ext == ".csv":
+            display_df.to_csv(out_path, index=False)
+        elif ext in (".md", ".markdown"):
+            out_path.write_text(display_df.to_markdown(index=False) + "\n")
+        elif ext == ".json":
+            payload = {
+                "view": "raw",
+                "dataset_tag": args.dataset_tag,
+                "split": args.split,
+                "metrics": metric_list,
+                "rows": raw_df.replace({np.nan: None}).to_dict(orient="records"),
+            }
+            out_path.write_text(json.dumps(payload, indent=2, default=str))
+        elif ext in (".xlsx", ".xls"):
+            with pd.ExcelWriter(out_path) as w:
+                raw_df.to_excel(w, sheet_name="raw", index=False)
+        else:
+            out_path.write_text(display_df.to_string(index=False) + "\n")
+        print(f"wrote {out_path}", file=sys.stderr)
+        return 0
+
+    # ── Pivot view (default, unchanged behavior) ────────────────────────────
     mean_df, std_df, n_df = collect(
         outputs_dir=outputs_dir,
         dataset_tag=args.dataset_tag,

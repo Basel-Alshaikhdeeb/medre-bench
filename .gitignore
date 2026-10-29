@@ -7,3 +7,4 @@ notebooks/Untitled*.ipynb
 *.dylib
 *.npz
 .venv/
+wandb/
