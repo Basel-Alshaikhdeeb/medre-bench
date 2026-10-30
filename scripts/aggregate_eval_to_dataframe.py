@@ -48,13 +48,26 @@ _AVAILABLE_METRICS = [
 ]
 
 
-def _iter_run_jsons(outputs_dir: Path, dataset_tag: str, split: str):
-    """Yield (model, seed, payload_dict) for every eval JSON discovered."""
+def _iter_run_jsons(outputs_dir: Path, dataset_tag, split: str):
+    """Yield (model, seed, payload_dict) for every eval JSON discovered.
+
+    ``dataset_tag`` matches ``parts[1]`` of the run directory name — the
+    training-time tag written at train time, e.g. ``aggregate_binary`` for
+    ``bert-base__aggregate_binary__seed123/`` or ``bc5cdr`` for
+    ``bert-base__bc5cdr__seed123/``. Pass a string for one tag or an
+    iterable to accept any of several (useful when the tree mixes
+    per-source training runs: chemprot, drugprot, ddi, bc5cdr, ...).
+    """
+    if isinstance(dataset_tag, str):
+        tag_set = {dataset_tag}
+    else:
+        tag_set = set(dataset_tag)
+
     for run_dir in sorted(outputs_dir.iterdir()):
         if not run_dir.is_dir():
             continue
         parts = run_dir.name.split("__")
-        if len(parts) < 3 or parts[1] != dataset_tag:
+        if len(parts) < 3 or parts[1] not in tag_set:
             continue
         model = parts[0]
         seed = parts[2].replace("seed", "").split("__")[0]
@@ -160,8 +173,11 @@ def main() -> int:
     p.add_argument("--outputs-dir", default="outputs",
                    help="Root dir containing per-run subdirs (default: outputs)")
     p.add_argument("--dataset-tag", default="aggregate_binary",
-                   help="Training-time tag in <model>__<tag>__seed<N>/ "
-                        "(default: aggregate_binary)")
+                   help="Training-time tag(s) in <model>__<tag>__seed<N>/. "
+                        "Pass one or a comma-separated list. For aggregate-paradigm "
+                        "trees use 'aggregate_binary' (default). For per-source "
+                        "training trees pass the sources, e.g. "
+                        "'chemprot,drugprot,ddi,bc5cdr'.")
     p.add_argument("--datasets", default=None,
                    help="Comma-separated per-source datasets to KEEP in the output, "
                         "e.g. 'chemprot,drugprot,ddi,bc5cdr'. Filters the per_source "
@@ -187,6 +203,9 @@ def main() -> int:
         print(f"error: {outputs_dir} is not a directory", file=sys.stderr)
         return 2
 
+    tag_list = [t.strip() for t in args.dataset_tag.split(",") if t.strip()]
+    tag_arg = tag_list[0] if len(tag_list) == 1 else set(tag_list)
+
     datasets_filter: set[str] | None = None
     if args.datasets:
         datasets_filter = {d.strip() for d in args.datasets.split(",") if d.strip()}
@@ -205,7 +224,7 @@ def main() -> int:
 
         raw_df = collect_raw(
             outputs_dir=outputs_dir,
-            dataset_tag=args.dataset_tag,
+            dataset_tag=tag_arg,
             split=args.split,
             metrics=metric_list,
             datasets=datasets_filter,
@@ -257,7 +276,7 @@ def main() -> int:
     # ── Pivot view (default, unchanged behavior) ────────────────────────────
     mean_df, std_df, n_df = collect(
         outputs_dir=outputs_dir,
-        dataset_tag=args.dataset_tag,
+        dataset_tag=tag_arg,
         split=args.split,
         metric=args.metric,
         datasets=datasets_filter,
