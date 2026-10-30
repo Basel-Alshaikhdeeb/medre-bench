@@ -78,13 +78,19 @@ def collect(
     dataset_tag: str,
     split: str,
     metric: str,
+    datasets: set[str] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Return (mean, std, n_seeds) DataFrames of shape (models x sources)."""
+    """Return (mean, std, n_seeds) DataFrames of shape (models x sources).
+
+    If ``datasets`` is given, only ``per_source`` keys in that set are kept.
+    """
     values: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
 
     for model, seed, payload in _iter_run_jsons(outputs_dir, dataset_tag, split):
         per_source = payload.get("per_source") or {}
         for source, m in per_source.items():
+            if datasets is not None and source not in datasets:
+                continue
             v = m.get(metric)
             if v is None:
                 continue
@@ -120,17 +126,21 @@ def collect_raw(
     dataset_tag: str,
     split: str,
     metrics: list[str],
+    datasets: set[str] | None = None,
 ) -> pd.DataFrame:
     """Return a long-format DataFrame with one row per (model, dataset, seed).
 
     Columns are ``["model", "dataset", "seed"] + metrics``. Nothing is
     averaged — every JSON contributes as many rows as it has sources under
-    ``per_source``. Missing metric values become ``NaN``.
+    ``per_source``. Missing metric values become ``NaN``. If ``datasets`` is
+    given, only ``per_source`` keys in that set are kept.
     """
     rows: list[dict] = []
     for model, seed, payload in _iter_run_jsons(outputs_dir, dataset_tag, split):
         per_source = payload.get("per_source") or {}
         for source, m in per_source.items():
+            if datasets is not None and source not in datasets:
+                continue
             row: dict = {"model": model, "dataset": source, "seed": seed}
             for metric in metrics:
                 v = m.get(metric)
@@ -141,7 +151,6 @@ def collect_raw(
         return pd.DataFrame(columns=["model", "dataset", "seed"] + metrics)
 
     df = pd.DataFrame(rows, columns=["model", "dataset", "seed"] + metrics)
-    # Deterministic ordering that reads well for humans
     df = df.sort_values(["model", "dataset", "seed"]).reset_index(drop=True)
     return df
 
@@ -151,7 +160,12 @@ def main() -> int:
     p.add_argument("--outputs-dir", default="outputs",
                    help="Root dir containing per-run subdirs (default: outputs)")
     p.add_argument("--dataset-tag", default="aggregate_binary",
-                   help="Aggregate variant to summarize: aggregate | aggregate_binary (default: aggregate_binary)")
+                   help="Training-time tag in <model>__<tag>__seed<N>/ "
+                        "(default: aggregate_binary)")
+    p.add_argument("--datasets", default=None,
+                   help="Comma-separated per-source datasets to KEEP in the output, "
+                        "e.g. 'chemprot,drugprot,ddi,bc5cdr'. Filters the per_source "
+                        "keys inside each eval JSON. Default: keep all sources present.")
     p.add_argument("--split", default="test", help="Which JSON split to pull (default: test)")
     p.add_argument("--view", choices=["pivot", "raw"], default="pivot",
                    help="'pivot' (default): model x dataset table averaged across seeds. "
@@ -173,6 +187,10 @@ def main() -> int:
         print(f"error: {outputs_dir} is not a directory", file=sys.stderr)
         return 2
 
+    datasets_filter: set[str] | None = None
+    if args.datasets:
+        datasets_filter = {d.strip() for d in args.datasets.split(",") if d.strip()}
+
     # ── Raw view: one row per (model, dataset, seed), no aggregation ────────
     if args.view == "raw":
         metric_list = [m.strip() for m in args.metrics.split(",") if m.strip()]
@@ -190,6 +208,7 @@ def main() -> int:
             dataset_tag=args.dataset_tag,
             split=args.split,
             metrics=metric_list,
+            datasets=datasets_filter,
         )
         if raw_df.empty:
             print(
@@ -241,6 +260,7 @@ def main() -> int:
         dataset_tag=args.dataset_tag,
         split=args.split,
         metric=args.metric,
+        datasets=datasets_filter,
     )
     if mean_df.empty:
         print(
