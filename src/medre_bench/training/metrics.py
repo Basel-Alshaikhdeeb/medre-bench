@@ -145,11 +145,21 @@ def compute_per_class_metrics(
     else:
         preds = predictions
 
+    # Pass labels= explicitly: sklearn otherwise infers unique classes from
+    # (y_true ∪ y_pred) and insists its count matches len(target_names). When
+    # the test split only exhibits a subset of label_names (common on
+    # taxonomy-heavy datasets like chem_dis_gene, or when the checkpoint's
+    # head is narrower than dataset.label_names() — see the head-size
+    # reconciliation in evaluator.run_evaluation), those extra classes get
+    # zero-filled rows instead of a ValueError.
+    report_labels = list(range(len(label_names)))
     report_dict = classification_report(
-        labels, preds, target_names=label_names, output_dict=True, zero_division=0
+        labels, preds, labels=report_labels, target_names=label_names,
+        output_dict=True, zero_division=0,
     )
     report_str = classification_report(
-        labels, preds, target_names=label_names, zero_division=0
+        labels, preds, labels=report_labels, target_names=label_names,
+        zero_division=0,
     )
 
     per_class = {}

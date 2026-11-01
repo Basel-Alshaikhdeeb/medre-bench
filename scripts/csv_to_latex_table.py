@@ -19,6 +19,11 @@ Examples::
     python scripts/csv_to_latex_table.py results/BinaryTomek.csv \\
         --metric macro --percent --bold-max \\
         --output tables/binary_balanced_macro.tex
+
+    # F1(+) table — binarized positive-class F1 from aggregate_eval
+    python scripts/csv_to_latex_table.py results/original_binary_f1_positive.csv \\
+        --metric f1_positive --percent --bold-max \\
+        --output tables/original_binary_f1_positive.tex
 """
 
 from __future__ import annotations
@@ -34,6 +39,13 @@ import pandas as pd
 METRIC_COLUMN: dict[str, str] = {
     "micro": "micro_f1",
     "macro": "macro_f1",
+    "f1_positive": "f1_positive",
+}
+
+METRIC_DISPLAY: dict[str, str] = {
+    "micro": "Micro-F1",
+    "macro": "Macro-F1",
+    "f1_positive": "F1$_{+}$",
 }
 
 
@@ -188,8 +200,9 @@ def main() -> int:
 
     stem = args.input_csv.stem
     pct_note = r" (\%)" if args.percent else ""
+    metric_display = METRIC_DISPLAY[args.metric]
     caption = args.caption or (
-        f"{args.metric.capitalize()}-F1{pct_note} mean $\\pm$ std over seeds "
+        f"{metric_display}{pct_note} mean $\\pm$ std over seeds "
         f"for the {_escape_latex(stem)} paradigm. "
         f"Seeds per cell: min={int(n.values.min())}, max={int(n.values.max())}."
     )
