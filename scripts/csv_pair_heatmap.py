@@ -41,6 +41,7 @@ from matplotlib.colors import TwoSlopeNorm
 METRIC_COLUMN: dict[str, str] = {
     "micro": "micro_f1",
     "macro": "macro_f1",
+    "f1": "f1_positive",
 }
 
 

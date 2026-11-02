@@ -1,0 +1,316 @@
+% Preamble requirements:
+%   \usepackage{pgfplots}
+%   \pgfplotsset{compat=1.18}
+%   \usepgfplotslibrary{groupplots, colormaps}
+% Sequential sky-blue colormap "RdBuDiv" is defined inline below.
+\begin{figure*}[t]
+\centering
+\begin{tikzpicture}
+\pgfplotsset{
+    colormap={RdBuDiv}{
+        rgb255=(240, 248, 252) rgb255=(210, 236, 250) rgb255=(190, 227, 247)
+        rgb255=(169, 218, 245) rgb255=(151, 213, 247) rgb255=(128, 202, 242)
+        rgb255=(104, 194, 242) rgb255=(88, 190, 245) rgb255=(64, 181, 245)
+        rgb255=(44, 172, 242) rgb255=(22, 168, 247)
+    },
+    heatmap base/.style={
+        colorbar,
+        colorbar style={width=0.25cm, font=\scriptsize},
+        enlargelimits=false,
+        y dir=reverse,
+        xtick={0,1,2,3,4,5,6,7},
+        xticklabels={BC5CDR,BioRED,ChemDisGene,ChemProt,DDI,DrugProt,EuADR,GAD},
+        xticklabel style={rotate=30, anchor=east, font=\scriptsize},
+        ytick={0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15},
+        yticklabels={BERT-base,Bio-ClinicalBERT,BioBERT,BioGPT,BioLinkBERT-base,BioLinkBERT-large,BioMed-RoBERTa,ClinicalBERT,GatorTron,GPT-2,PubMed-RoBERTa,PubMedBERT,PubMedBERT-large,RoBERTa-base,RoBERTa-large,SciBERT},
+        yticklabel style={font=\scriptsize},
+        title style={font=\small, align=center},
+        every node near coord/.append style={anchor=center, inner sep=1pt, font=\tiny},
+    },
+}
+\begin{groupplot}[
+    group style={group size=2 by 1, horizontal sep=2cm},
+    width=10cm, height=7.2cm,
+]
+\nextgroupplot[
+    heatmap base,
+    colormap name=RdBuDiv,
+    title={Unbalanced Multiclass\\F1-Positive},
+    point meta min=0.198320, point meta max=0.898460,
+    nodes near coords={\pgfmathprintnumber[fixed, fixed zerofill, precision=3]{\pgfplotspointmeta}},
+]
+\addplot[matrix plot*, mesh/cols=8, point meta=explicit] table[meta=val] {
+x y val
+0 0 0.683540
+1 0 0.439540
+2 0 0.842400
+3 0 0.735680
+4 0 0.855160
+5 0 0.784140
+6 0 0
+7 0 0.799300
+0 1 0.666800
+1 1 0.204680
+2 1 0.848040
+3 1 0.711220
+4 1 0.827580
+5 1 0.785120
+6 1 0
+7 1 0.802100
+0 2 0.710600
+1 2 0.362480
+2 2 0.862260
+3 2 0.756620
+4 2 0.865960
+5 2 0.806380
+6 2 0
+7 2 0.833400
+0 3 0.706320
+1 3 0.444640
+2 3 0.862520
+3 3 0.778340
+4 3 0.878940
+5 3 0.813640
+6 3 0
+7 3 0.794440
+0 4 0.726760
+1 4 0.267440
+2 4 0.873100
+3 4 0.768300
+4 4 0.875340
+5 4 0.820640
+6 4 0
+7 4 0.828020
+0 5 0.745640
+1 5 0.554120
+2 5 0.877200
+3 5 0.795920
+4 5 0.894440
+5 5 0.826480
+6 5 0
+7 5 0.834340
+0 6 0.696440
+1 6 0.470100
+2 6 0.865380
+3 6 0.767300
+4 6 0.876820
+5 6 0.795700
+6 6 0
+7 6 0.827080
+0 7 0.678660
+1 7 0.198320
+2 7 0.850000
+3 7 0.716320
+4 7 0.826360
+5 7 0.786740
+6 7 0
+7 7 0.807980
+0 8 0.733840
+1 8 0.505220
+2 8 0.877720
+3 8 0.763760
+4 8 0.878220
+5 8 0.817920
+6 8 0
+7 8 0.826680
+0 9 0.654060
+1 9 0.364220
+2 9 0.827760
+3 9 0.751260
+4 9 0.839160
+5 9 0.775020
+6 9 0
+7 9 0.787780
+0 10 0.693140
+1 10 0.400600
+2 10 0.860380
+3 10 0.761220
+4 10 0.866760
+5 10 0.802560
+6 10 0
+7 10 0.806880
+0 11 0.717640
+1 11 0.409800
+2 11 0.868000
+3 11 0.774620
+4 11 0.876880
+5 11 0.806440
+6 11 0
+7 11 0.823240
+0 12 0.743320
+1 12 0.500060
+2 12 0.869700
+3 12 0.795940
+4 12 0.898460
+5 12 0.831480
+6 12 0
+7 12 0.830580
+0 13 0.690080
+1 13 0.522400
+2 13 0.848580
+3 13 0.760460
+4 13 0.860780
+5 13 0.793920
+6 13 0
+7 13 0.802580
+0 14 0.701580
+1 14 0.504780
+2 14 0.866880
+3 14 0.761960
+4 14 0.885580
+5 14 0.811000
+6 14 0
+7 14 0.822420
+0 15 0.704700
+1 15 0.461440
+2 15 0.860320
+3 15 0.774560
+4 15 0.866600
+5 15 0.798480
+6 15 0
+7 15 0.818820
+};
+
+\nextgroupplot[
+    heatmap base,
+    colormap name=RdBuDiv,
+    title={Unbalanced Binary $-$ Unbalanced Multiclass\\$\Delta$ F1-Positive},
+    point meta min=-0.811000, point meta max=0.811000,
+    nodes near coords={\pgfmathprintnumber[fixed, fixed zerofill, precision=3, print sign]{\pgfplotspointmeta}},
+]
+\addplot[matrix plot*, mesh/cols=8, point meta=explicit] table[meta=val] {
+x y val
+0 0 -0.011520
+1 0 0.116600
+2 0 -0.003300
+3 0 0.013820
+4 0 0.006040
+5 0 -0.020160
+6 0 0
+7 0 -0.013900
+0 1 0.002000
+1 1 0.329300
+2 1 0.001760
+3 1 0.035280
+4 1 0.017220
+5 1 -0.020980
+6 1 0
+7 1 -0.002620
+0 2 0.001140
+1 2 0.246740
+2 2 -0.000720
+3 2 0.027640
+4 2 0.006360
+5 2 -0.008340
+6 2 0
+7 2 -0.006700
+0 3 -0.001880
+1 3 0.167520
+2 3 -0.009980
+3 3 0.001220
+4 3 -0.006240
+5 3 -0.027640
+6 3 0
+7 3 0.003940
+0 4 0.000460
+1 4 0.339660
+2 4 0.005460
+3 4 0.037240
+4 4 0.010340
+5 4 -0.010560
+6 4 0
+7 4 -0.006880
+0 5 -0.004100
+1 5 0.056860
+2 5 -0.008660
+3 5 0.011640
+4 5 -0.004460
+5 5 -0.574340
+6 5 0
+7 5 -0.001620
+0 6 0.015840
+1 6 0.076700
+2 6 -0.003900
+3 6 0.003760
+4 6 0.005060
+5 6 -0.010280
+6 6 0
+7 6 -0.017000
+0 7 0.002080
+1 7 0.332860
+2 7 -0.004500
+3 7 0.026740
+4 7 0.019100
+5 7 -0.022420
+6 7 0
+7 7 -0.002520
+0 8 -0.006640
+1 8 0.101160
+2 8 -0.016180
+3 8 0.022700
+4 8 0.006320
+5 8 -0.018360
+6 8 0
+7 8 -0.010360
+0 9 0.005520
+1 9 0.177940
+2 9 -0.017700
+3 9 0.005480
+4 9 0.003600
+5 9 -0.021000
+6 9 0
+7 9 0.009360
+0 10 -0.015360
+1 10 0.171220
+2 10 -0.011120
+3 10 0.011520
+4 10 0.007160
+5 10 -0.020860
+6 10 0
+7 10 -0.001240
+0 11 0.000120
+1 11 0.199240
+2 11 -0.008520
+3 11 0.017260
+4 11 0.008880
+5 11 -0.004040
+6 11 0
+7 11 0.008740
+0 12 -0.007120
+1 12 0.122880
+2 12 -0.002840
+3 12 0.005240
+4 12 -0.009080
+5 12 -0.020940
+6 12 0
+7 12 0.003440
+0 13 -0.012660
+1 13 0.029380
+2 13 -0.018820
+3 13 -0.005160
+4 13 0.007220
+5 13 -0.031040
+6 13 0
+7 13 -0.013100
+0 14 -0.428880
+1 14 0.067140
+2 14 -0.581980
+3 14 -0.453960
+4 14 -0.008340
+5 14 -0.811000
+6 14 0
+7 14 -0.033320
+0 15 -0.003340
+1 15 0.114080
+2 15 -0.002420
+3 15 -0.003220
+4 15 0.003260
+5 15 -0.023180
+6 15 0
+7 15 -0.002380
+};
+\end{groupplot}
+\end{tikzpicture}
+\caption{F1-psoitive for Unbalanced Multiclass - Baseline (left) and the Unbalanced Binary $-$ Baseline delta (right).}
+\label{fig:original_multiclass_f1_positive_vs_multi_f1_positive_BinaryRiginal_f1}
+\end{figure*}
